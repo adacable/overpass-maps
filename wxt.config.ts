@@ -11,11 +11,21 @@ export default defineConfig({
     permissions: ['storage'],
     host_permissions: OVERPASS_HOST_PERMISSIONS,
     action: { default_title: 'Overpass Maps' },
-    // Firefox MV2 has no MAIN-world content scripts, so its camera hook is
-    // injected as a <script>; moz-extension:// URLs are random per install.
-    ...(browser === 'firefox' ? { web_accessible_resources: ['camera-hook.js'] } : {}),
-    browser_specific_settings: {
-      gecko: { id: 'overpass-maps@thingsarebootwontfix.com' },
-    },
+    ...(browser === 'firefox'
+      ? {
+          // Firefox MV2 has no MAIN-world content scripts, so its camera hook is
+          // injected as a <script>; moz-extension:// URLs are random per install.
+          web_accessible_resources: ['camera-hook.js'],
+          browser_specific_settings: {
+            gecko: {
+              id: 'overpass-maps@thingsarebootwontfix.com',
+              // The map view's area goes to the chosen Overpass server with each
+              // query (see PRIVACY.md). Firefox shows this at install; it needs 140+.
+              data_collection_permissions: { required: ['locationInfo'] },
+              strict_min_version: '140.0',
+            },
+          },
+        }
+      : {}),
   }),
 });
