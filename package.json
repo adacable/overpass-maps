@@ -14,7 +14,9 @@
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
     "test": "node --test tests/*.test.ts",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "lint:firefox": "web-ext lint --source-dir .output/firefox-mv2",
+    "check": "npm run compile && npm test && wxt build && wxt build -b firefox && npm run lint:firefox"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

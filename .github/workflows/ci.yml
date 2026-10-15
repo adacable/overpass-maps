@@ -1,0 +1,20 @@
+# Type-check, test, build for both browsers and lint the Firefox build.
+# No secrets: releases are run locally (scripts/release.sh).
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Tests are run as .ts directly, which needs Node's built-in type stripping.
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check

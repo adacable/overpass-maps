@@ -85,6 +85,7 @@ npm run build          # .output/chrome-mv3
 npm run build:firefox  # .output/firefox-mv2
 npm test               # unit tests (projection, URL parsing, OSM → GeoJSON)
 npm run compile        # type-check
+npm run check          # all of the above plus both builds and Firefox's linter (what CI runs)
 ```
 
 To load a build by hand:
@@ -94,6 +95,28 @@ To load a build by hand:
   Add-on" and pick `.output/firefox-mv2/manifest.json`.
 
 Reload any Google Maps tabs that were already open after installing.
+
+## Release
+
+Releases are submitted from a maintainer's machine; CI only runs `npm run check`.
+The store credentials are kept in `.env.submit.age`, encrypted to a YubiKey with
+[age-plugin-fido2-hmac](https://github.com/olastor/age-plugin-fido2-hmac), and are
+only ever decrypted into the submit process's memory.
+
+```sh
+scripts/secrets.sh init        # once: encrypt an empty credentials template
+scripts/secrets.sh edit        # fill in or change the credentials
+scripts/release.sh --dry-run   # check the credentials against both stores
+scripts/release.sh             # submit package.json's version for review, then tag it
+```
+
+To release, bump the version (`npm version patch --no-git-tag-version`), commit,
+sign and push, then run `scripts/release.sh`. It refuses to run unless what's
+checked out is what's pushed. Both stores review each version before it goes
+live.
+
+The store screenshots and icon PNGs are made by scripts in `scripts/`: see
+`scripts/store-screenshots/README.md` and `scripts/render-icons.mjs`.
 
 ## How the overlay lines up
 

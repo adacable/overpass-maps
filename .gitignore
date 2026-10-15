@@ -5,3 +5,8 @@ web-ext.config.ts
 *.log
 .DS_Store
 .chrome-profile
+
+# Store credentials: encrypted copy only, see scripts/release.sh
+.env.submit
+.env.submit.age
+.env.submit.recipient
