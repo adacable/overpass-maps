@@ -258,10 +258,18 @@ export function normaliseQuery(query: string): string {
   return `[out:json][timeout:60];\n${q}`;
 }
 
-/** Overpass errors come back as an HTML page; pull out the message text. */
+/**
+ * Overpass errors come back as an HTML page; pull out the message text. Its
+ * proxy's busy replies are Markdown-style plain text: keep the first paragraph
+ * that isn't a heading.
+ */
 export function overpassErrorText(body: string): string {
   const matches = [...body.matchAll(/<strong[^>]*>\s*Error\s*<\/strong>:?\s*([^<]+)/gi)].map((m) => m[1].trim());
   if (matches.length) return matches.join('; ');
+  if (!body.includes('<')) {
+    const para = body.split(/\n\s*\n/).find((p) => p.trim() && !p.trim().startsWith('#'));
+    if (para) body = para;
+  }
   return body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 

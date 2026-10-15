@@ -163,3 +163,8 @@ test('overpassErrorText pulls the messages out of an error page', () => {
   assert.equal(overpassErrorText(page), 'line 1: parse error: unknown type "nod"; line 1: static error: bad');
   assert.equal(overpassErrorText('<h1>Too Many Requests</h1>\n<p>slow down</p>'), 'Too Many Requests slow down');
 });
+
+test('overpassErrorText keeps the first paragraph of a plain-text busy reply', () => {
+  const body = '# 502 Gateway Timeout\n\nThis Overpass API server is currently at capacity. All query workers are busy\nand the request queue is full.\n\n## What to do\n\nRetry your request.';
+  assert.equal(overpassErrorText(body), 'This Overpass API server is currently at capacity. All query workers are busy and the request queue is full.');
+});

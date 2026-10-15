@@ -2,6 +2,7 @@
   "name": "overpass-maps",
   "description": "Overlay Overpass API query results on Google Maps",
   "private": true,
+  "license": "GPL-3.0-only",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

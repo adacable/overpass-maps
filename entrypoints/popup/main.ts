@@ -171,36 +171,51 @@ function nextServer(): string {
   return OVERPASS_ENDPOINTS[(i + 1) % OVERPASS_ENDPOINTS.length];
 }
 
+/** Switch to the next built-in server and run the query there. */
+function tryNextButton() {
+  const next = nextServer();
+  return el('button', {
+    className: 'text',
+    textContent: `Try ${hostOf(next)}`,
+    onclick: async () => {
+      await saveSettings({ endpoint: next });
+      showSettings();
+      await runQuery();
+    },
+  });
+}
+
+const mmss = (ms: number) => {
+  const secs = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+};
+
 function showActivity(s: RunStatus) {
   currentStatus = s;
   clearInterval(ticker);
   updateRunButton();
   activityEl.classList.toggle('error', s.state === 'error');
+  // Server messages can run to a few lines: give them the row's full width.
+  activityEl.classList.toggle('wide', s.state === 'error' || (s.state === 'running' && !!s.problem));
   if (s.state === 'running') {
-    const elapsed = el('span', { className: 'elapsed' });
+    const line = el('span');
+    const cancel = el('button', { className: 'text', textContent: 'Cancel', onclick: () => void sendToBackground({ type: 'cancelQuery' }) });
+    // After a busy reply: say why, and offer another server.
+    const problem = s.problem ? [el('span', { className: 'problem', textContent: s.problem }), el('br')] : [];
+    const tries = s.attempt ? ` (try ${s.attempt} of ${s.attempts})` : '';
     const tick = () => {
-      const secs = Math.max(0, Math.round((Date.now() - s.startedAt) / 1000));
-      elapsed.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      const now = Date.now();
+      line.textContent = s.retryAt && now < s.retryAt
+        ? `Retrying ${hostOf(s.endpoint)} in ${Math.ceil((s.retryAt - now) / 1000)} s${tries}. `
+        : `Searching ${hostOf(s.endpoint)}… ${mmss(now - s.startedAt)}${tries} `;
     };
     tick();
     ticker = setInterval(tick, 1000);
-    const cancel = el('button', { className: 'text', textContent: 'Cancel', onclick: () => void sendToBackground({ type: 'cancelQuery' }) });
-    activityEl.replaceChildren(`Searching ${hostOf(s.endpoint)}… `, elapsed, ' ', cancel);
+    activityEl.replaceChildren(...problem, line, cancel);
+    if (s.attempt) activityEl.append(' ', tryNextButton());
   } else if (s.state === 'error') {
     activityEl.replaceChildren(s.message);
-    if (s.unreachable) {
-      const next = nextServer();
-      const retry = el('button', {
-        className: 'text',
-        textContent: `Try ${hostOf(next)}`,
-        onclick: async () => {
-          await saveSettings({ endpoint: next });
-          showSettings();
-          runBtn.click();
-        },
-      });
-      activityEl.append(' ', retry);
-    }
+    if (s.unreachable) activityEl.append(' ', tryNextButton());
   } else {
     activityEl.replaceChildren();
   }
@@ -209,12 +224,15 @@ function showActivity(s: RunStatus) {
 showActivity(currentStatus);
 statusItem.watch((s) => showActivity(s));
 
-runBtn.addEventListener('click', async () => {
+/** Run the query for this tab's map view. A query already running is replaced. */
+async function runQuery() {
   const view = await getView();
   if (!view?.ok) return void previewArea();
   const bbox = expandBounds(view.bounds, settings.minBboxKm);
   await sendToBackground({ type: 'runQuery', query: fillPlaceholders(queryEl.value, bbox, view.center) });
-});
+}
+
+runBtn.addEventListener('click', () => void runQuery());
 
 // ===== Legend: what's on the map =====
 

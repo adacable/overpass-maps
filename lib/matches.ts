@@ -12,11 +12,15 @@ export const MAPS_MATCHES = GOOGLE_DOMAINS.map((d) => `https://www.${d}/maps*`);
 /** https only: queries reveal where you're looking on the map. */
 export const isHttpsUrl = (v: string) => URL.canParse(v) && new URL(v).protocol === 'https:';
 
-// Overpass servers send `Access-Control-Allow-Origin: *`, so the extension
-// needs no host permissions to query them.
 export const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.private.coffee/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
+
+// Overpass servers allow cross-origin requests, but their busy and rate-limit
+// replies (from the proxy in front) don't, so without host permissions those
+// reach the extension only as an unexplained network error. With them, the
+// real status and message can be read and shown.
+export const OVERPASS_HOST_PERMISSIONS = OVERPASS_ENDPOINTS.map((u) => `https://${new URL(u).host}/*`);
 

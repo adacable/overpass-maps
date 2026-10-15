@@ -12,7 +12,18 @@ export interface Settings {
 
 export type RunStatus =
   | { state: 'idle' }
-  | { state: 'running'; startedAt: number; endpoint: string }
+  | {
+      state: 'running';
+      startedAt: number;
+      endpoint: string;
+      /** After a busy reply: which try this is (from 2), out of `attempts`. */
+      attempt?: number;
+      attempts?: number;
+      /** When the next try starts; it's waiting until then. */
+      retryAt?: number;
+      /** Why the last try failed. */
+      problem?: string;
+    }
   | { state: 'done'; count: number; finishedAt: number }
   /** `unreachable`: no usable response from the server, so another server may do better. */
   | { state: 'error'; message: string; finishedAt: number; unreachable?: boolean };

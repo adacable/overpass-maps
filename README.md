@@ -19,7 +19,8 @@ feature are taken over, to show its details.
      `out center;` for just points.
 3. While a query runs, the popup shows the server and the time taken, and the
    toolbar badge shows “…”; when it's done, the badge shows the feature count.
-   If a server is down or busy, the error offers the next server in one click.
+   If a server is busy or down, it's retried for about a minute, and the popup
+   offers the next server in one click.
 4. Results stay on the map, in every Google Maps tab, until you click
    **Clear**. **Hide** / **Show** toggles them, **Zoom to** moves the map to fit
    them (this reloads the page), and the colour swatch sets their colour.
@@ -33,14 +34,19 @@ feature are taken over, to show its details.
 
 ## Permissions and privacy
 
-- **Permissions:** only `storage`, plus access to Google Maps pages through
-  the content-script matches. There are no host permissions: Overpass servers
-  allow cross-origin requests (CORS). If a server is down or rate-limiting,
-  its error has no CORS headers, so you get a generic "couldn't reach the
-  server" message.
+- **Permissions:** `storage`; access to Google Maps pages through the
+  content-script matches; and the three built-in Overpass servers. Those
+  servers allow cross-origin requests (CORS), but their busy and rate-limit
+  replies don't, so the permission is what lets the extension read and show
+  why a query failed. A custom server's error replies without CORS headers
+  only show as "couldn't reach".
+- **Busy servers:** when a server is busy, rate-limiting or unreachable, the
+  query is retried on the same server after 4, 8, 16 and 32 s (or the
+  server's `Retry-After`), as Overpass asks. The popup shows the server's
+  reason and a countdown, with Cancel and a button to switch servers.
 - **What leaves the browser:** the query, the queried area (where you're
   looking) and your IP address go to the configured Overpass endpoint, which
-  must be https. Nothing goes anywhere else.
+  must be https. Nothing goes anywhere else. See [PRIVACY.md](PRIVACY.md).
 - **What Google's page can see:** the overlays and the details card live in
   closed shadow roots, so page scripts can't read the drawn results or tag
   values. The page can still tell the extension is present: from the
@@ -49,6 +55,25 @@ feature are taken over, to show its details.
 - **Inputs are untrusted:** camera events from the page are range-checked;
   OSM tag values are only ever inserted as text; only the popup's own page
   can start a query; results over 8 MB are refused rather than stored.
+
+## Build from source
+
+This is how the store packages are made, and how to reproduce them.
+
+Requirements: Node.js 22 or newer (built with 25.9) and npm 10 or newer, on
+macOS, Linux or Windows.
+
+```sh
+npm ci                 # install the exact dependency versions in package-lock.json
+npm run zip            # Chrome: .output/overpass-maps-<version>-chrome.zip
+npm run zip:firefox    # Firefox: .output/overpass-maps-<version>-firefox.zip
+                       #   and .output/overpass-maps-<version>-sources.zip
+```
+
+The unpacked builds end up in `.output/chrome-mv3` and `.output/firefox-mv2`.
+The JavaScript is bundled and minified by [WXT](https://wxt.dev) (Vite) from
+the TypeScript in `entrypoints/` and `lib/`; nothing is fetched or generated
+at build time beyond the npm packages.
 
 ## Develop
 
@@ -104,5 +129,9 @@ Known limits:
 - The camera message format is undocumented. Field paths were found by
   inspection, and fields 5/6 are assumed to be heading/tilt.
 - 3D, tilted and rotated views hide the overlay. In Street View it's shown on the mini-map only.
-- Features that cross the antimeridian, or repeat when the world wraps at low
-  zoom, aren't handled.
+
+## Licence
+
+[GNU General Public License v3.0](LICENSE). Map data
+© [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),
+available under the Open Database Licence.

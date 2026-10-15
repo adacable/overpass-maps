@@ -35,6 +35,8 @@ const STYLE = `
   a { color: var(--link); text-decoration: none; }
   a:hover { text-decoration: underline; }
   a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 2px; }
+  .credit { padding: 0 14px 10px; color: var(--muted); font-size: 11px; }
+  .credit a { color: inherit; }
   .pager { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   @media (prefers-color-scheme: dark) {
     .card { --paper: #171a22; --ink: #e4e7ee; --muted: #9aa1af; --rule: #2c313c; --link: #a9abf2; --hover: #232836;
@@ -147,6 +149,8 @@ export class FeatureCard {
       el('header', {}, el('span', { className: 'key' }), el('div', { className: 'titles' }, el('h1', { textContent: title(f) }), el('div', { className: 'sub', textContent: subtitle(f) })), button('✕', 'Close', () => this.close())),
       tags,
       footer,
+      // OSM's licence asks for this wherever its data is shown.
+      el('div', { className: 'credit' }, '© ', link('https://www.openstreetmap.org/copyright', 'OpenStreetMap contributors')),
     );
     this.onChange();
   }

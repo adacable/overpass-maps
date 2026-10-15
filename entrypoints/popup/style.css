@@ -154,11 +154,17 @@ button:disabled {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+.activity.wide {
+  flex-basis: 100%;
+}
 .activity.error {
   color: var(--error);
 }
-.activity .elapsed {
+.activity {
   font-variant-numeric: tabular-nums;
+}
+.activity .problem {
+  color: var(--error);
 }
 button.text {
   padding: 2px 4px;
@@ -255,6 +261,16 @@ input[type='number'] {
 }
 input:invalid {
   border-color: var(--error);
+}
+
+/* ===== OSM credit ===== */
+
+.credit {
+  color: var(--muted);
+  font-size: 11px;
+}
+.credit a {
+  color: inherit;
 }
 
 @media (prefers-reduced-motion: no-preference) {
