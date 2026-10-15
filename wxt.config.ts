@@ -19,9 +19,10 @@ export default defineConfig({
           browser_specific_settings: {
             gecko: {
               id: 'overpass-maps@thingsarebootwontfix.com',
-              // The map view's area goes to the chosen Overpass server with each
-              // query (see PRIVACY.md). Firefox shows this at install; it needs 140+.
-              data_collection_permissions: { required: ['locationInfo'] },
+              // The area of the map on screen goes to the chosen Overpass server
+              // with each query (see PRIVACY.md). That's what the page shows, not
+              // where the user is. Firefox shows this at install; it needs 140+.
+              data_collection_permissions: { required: ['websiteContent'] },
               strict_min_version: '140.0',
             },
           },
