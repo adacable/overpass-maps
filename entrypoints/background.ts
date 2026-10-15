@@ -25,7 +25,7 @@ const toolbar = browser.action ?? browser.browserAction;
 async function showBadge() {
   const [status, { color }] = await Promise.all([statusItem.getValue(), getSettings()]);
   const text = { idle: '', running: '…', done: status.state === 'done' ? compactCount(status.count) : '', error: '!' }[status.state];
-  const background = status.state === 'error' ? '#b3261e' : status.state === 'running' ? '#5d6d71' : color;
+  const background = status.state === 'error' ? '#b3261e' : status.state === 'running' ? '#646b7a' : color;
   await toolbar.setBadgeText({ text });
   await toolbar.setBadgeBackgroundColor({ color: background });
   await toolbar.setBadgeTextColor?.({ color: status.state === 'done' ? inkOn(color) : '#fff' });

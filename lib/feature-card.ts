@@ -4,11 +4,12 @@ import type { Prepared } from './render.ts';
 // A small card showing a feature's OSM tags, shown where the user clicked.
 // Tag values come from OSM and are untrusted: only ever inserted as text, never as HTML.
 
-// Same map-paper palette as the popup; the accent is the overlay colour.
+// Same indigo-on-slate palette as the popup; the accent is the overlay colour.
 const STYLE = `
   :host { all: initial; }
   .card {
-    --paper: #f6f8f5; --ink: #1a292e; --muted: #5d6d71; --rule: #d9e0dc; --water: #2d6a88; --hover: #e6ece8;
+    --paper: #f2f4f7; --ink: #1c2230; --muted: #646b7a; --rule: #d9dde5; --link: #3f3d96; --hover: #e4e8ef;
+    --tint: color-mix(in srgb, var(--accent) 18%, transparent);
     position: fixed; z-index: 2147483647; width: 300px; max-height: 380px;
     display: flex; flex-direction: column; overflow: hidden;
     background: var(--paper); color: var(--ink); border-radius: 10px;
@@ -16,13 +17,13 @@ const STYLE = `
     font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   }
   header { display: flex; align-items: flex-start; gap: 10px; padding: 12px 10px 10px 14px; }
-  .key { flex: none; width: 14px; height: 14px; margin-top: 3px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 25%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+  .key { flex: none; width: 14px; height: 14px; margin-top: 3px; border-radius: 4px; background: var(--tint); box-shadow: inset 0 0 0 2px var(--accent); }
   .titles { flex: 1; min-width: 0; }
   h1 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
   .sub { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
   button { all: unset; cursor: pointer; border-radius: 6px; width: 24px; height: 24px; display: grid; place-items: center; color: var(--muted); font-size: 15px; }
   button:hover { background: var(--hover); color: var(--ink); }
-  button:focus-visible { outline: 2px solid var(--water); outline-offset: 1px; }
+  button:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
   button:disabled { opacity: .35; cursor: default; background: none; }
   .tags { overflow: auto; padding: 0 14px 6px; }
   table { border-collapse: collapse; width: 100%; }
@@ -31,12 +32,13 @@ const STYLE = `
   .empty { color: var(--muted); padding: 4px 0 8px; }
   footer { display: flex; align-items: center; gap: 4px; padding: 8px 10px 10px 14px; border-top: 1px solid var(--rule); }
   footer a { flex: 1; }
-  a { color: var(--water); text-decoration: none; }
+  a { color: var(--link); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  a:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; border-radius: 2px; }
+  a:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 2px; }
   .pager { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   @media (prefers-color-scheme: dark) {
-    .card { --paper: #132024; --ink: #e2ece9; --muted: #93a5a8; --rule: #2a3a3e; --water: #7fb6d2; --hover: #1f3035;
+    .card { --paper: #171a22; --ink: #e4e7ee; --muted: #9aa1af; --rule: #2c313c; --link: #a9abf2; --hover: #232836;
+      --tint: color-mix(in srgb, var(--accent) 45%, #8a8fa0 25%);
       box-shadow: 0 0 0 1px rgb(255 255 255 / .06), 0 6px 20px rgb(0 0 0 / .5); }
   }
 `;

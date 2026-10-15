@@ -22,11 +22,20 @@ nwr["amenity"="cafe"]({{bbox}});
 out geom;`;
 
 export const settingsItem = storage.defineItem<Settings>('local:settings', {
-  fallback: { minBboxKm: 2, color: '#e8175d', endpoint: OVERPASS_ENDPOINTS[0], visible: true },
+  fallback: { minBboxKm: 2, color: '#3f3d96', endpoint: OVERPASS_ENDPOINTS[0], visible: true },
 });
 
-/** Stored settings over the defaults, so settings saved by an older version get any new keys. */
-const withDefaults = (s: Partial<Settings> | null): Settings => ({ ...settingsItem.fallback, ...s });
+/** The default colour before the indigo scheme; still stored by earlier installs. */
+const OLD_DEFAULT_COLOR = '#e8175d';
+
+/**
+ * Stored settings over the defaults, so settings saved by an older version get
+ * any new keys, and the old default colour moves to the new one.
+ */
+function withDefaults(s: Partial<Settings> | null): Settings {
+  const merged = { ...settingsItem.fallback, ...s };
+  return merged.color === OLD_DEFAULT_COLOR ? { ...merged, color: settingsItem.fallback.color } : merged;
+}
 
 export const getSettings = async () => withDefaults(await settingsItem.getValue());
 
