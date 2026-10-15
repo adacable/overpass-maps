@@ -92,31 +92,36 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepar
   ctx.lineCap = 'round';
   const dots: [number, number][] = [];
 
-  for (const f of features) {
-    if (f.maxX < vMinX || f.minX > vMaxX || f.maxY < vMinY || f.minY > vMaxY) continue;
-    const dot = dotAt(f, ws);
-    if (dot) {
-      dots.push([dot[0] * ws + ox, dot[1] * ws + oy]);
-      continue;
+  // The world repeats east and west of itself (zoomed far out, or panned
+  // across ±180°): draw every copy in view.
+  for (let copy = Math.floor(vMinX); copy <= Math.floor(vMaxX); copy++) {
+    const kx = ox + copy * ws;
+    for (const f of features) {
+      if (f.maxX + copy < vMinX || f.minX + copy > vMaxX || f.maxY < vMinY || f.minY > vMaxY) continue;
+      const dot = dotAt(f, ws);
+      if (dot) {
+        dots.push([dot[0] * ws + kx, dot[1] * ws + oy]);
+        continue;
+      }
+      ctx.beginPath();
+      for (const p of f.parts) {
+        ctx.moveTo(p[0] * ws + kx, p[1] * ws + oy);
+        for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * ws + kx, p[i + 1] * ws + oy);
+        if (f.kind === 'polygon') ctx.closePath();
+      }
+      if (f.kind === 'polygon') {
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = color;
+        ctx.fill('evenodd');
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = 2;
+      } else {
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 3;
+      }
+      ctx.strokeStyle = color;
+      ctx.stroke();
     }
-    ctx.beginPath();
-    for (const p of f.parts) {
-      ctx.moveTo(p[0] * ws + ox, p[1] * ws + oy);
-      for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * ws + ox, p[i + 1] * ws + oy);
-      if (f.kind === 'polygon') ctx.closePath();
-    }
-    if (f.kind === 'polygon') {
-      ctx.globalAlpha = 0.25;
-      ctx.fillStyle = color;
-      ctx.fill('evenodd');
-      ctx.globalAlpha = 0.9;
-      ctx.lineWidth = 2;
-    } else {
-      ctx.globalAlpha = 0.85;
-      ctx.lineWidth = 3;
-    }
-    ctx.strokeStyle = color;
-    ctx.stroke();
   }
 
   ctx.globalAlpha = 1;
@@ -150,7 +155,7 @@ function segmentDistSq(px: number, py: number, ax: number, ay: number, bx: numbe
 export function hitTest(view: View, features: Prepared[], sx: number, sy: number): Prepared[] {
   const { scale: ws, ox, oy } = screenTransform(view);
   // Work in world units: the click position and tolerances.
-  const px = (sx - ox) / ws;
+  const wx = (sx - ox) / ws;
   const py = (sy - oy) / ws;
   const tol = HIT_TOLERANCE_PX / ws;
   const dotR = (POINT_RADIUS + 3) / ws;
@@ -158,6 +163,8 @@ export function hitTest(view: View, features: Prepared[], sx: number, sy: number
   const hits: { f: Prepared; rank: number; size: number }[] = [];
 
   for (const f of features) {
+    // The click in the copy of the world nearest this feature (see draw).
+    const px = wx - Math.round(wx - (f.minX + f.maxX) / 2);
     if (px < f.minX - pad || px > f.maxX + pad || py < f.minY - pad || py > f.maxY + pad) continue;
     const dot = dotAt(f, ws);
     if (dot) {

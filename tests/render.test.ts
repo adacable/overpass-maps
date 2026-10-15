@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { project, type View } from '../lib/mercator.ts';
 import type { Feature, FeatureCollection, Geometry, Position } from '../lib/osm.ts';
-import { hitTest, prepare } from '../lib/render.ts';
+import { draw, hitTest, prepare } from '../lib/render.ts';
 
 // A 1000px view at zoom 16, centred on (0, 51.5).
 const [cx, cy] = project(0, 51.5);
@@ -64,4 +64,51 @@ test('hitTest: shapes too small to see are hit as dots', () => {
   const [x, y] = at(0, 51.5);
   assert.deepEqual(ids(hitTest(view, prepared, x + 6, y)), ['way/tiny']);
   assert.deepEqual(ids(hitTest(view, prepared, x + 20, y)), []);
+});
+
+/** A canvas context that records where dots (arcs) are drawn. */
+function recordingContext(width: number, height: number) {
+  const arcs: [number, number][] = [];
+  const ctx = new Proxy({ canvas: { width, height }, arc: (x: number, y: number) => arcs.push([x, y]) } as Record<string, unknown>, {
+    get: (t, k) => (k in t ? t[k as string] : () => {}),
+    set: () => true,
+  });
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, arcs };
+}
+
+const points = (...lngs: number[]) =>
+  prepare(fc(...lngs.map((lng, i) => feature(`node/${i}`, { type: 'Point', coordinates: [lng, -17] }))));
+
+test('draw: features either side of the antimeridian both show when the view straddles it', () => {
+  const [x, y] = project(180, -17);
+  const v: View = { cx: x, cy: y, zoom: 10, width: 1000, height: 500 };
+  const { ctx, arcs } = recordingContext(1000, 500);
+  draw(ctx, v, points(179.9, -179.9), 'red');
+  assert.equal(arcs.length, 2);
+  const [west, east] = arcs.map(([ax]) => ax).sort((a, b) => a - b);
+  assert.ok(west < 500 && east > 500, `${west}, ${east}`);
+});
+
+test('draw: zoomed far out, every copy of the world in view is drawn', () => {
+  const { ctx, arcs } = recordingContext(1000, 256);
+  // At zoom 0 the world is 256px wide: copies of a point at the centre fall at
+  // x = 500 ± 256k, of which 244, 500 and 756 are on screen.
+  draw(ctx, { cx: 0.5, cy: 0.5, zoom: 0, width: 1000, height: 256 }, points(0), 'red');
+  assert.deepEqual(arcs.map(([x]) => x), [244, 500, 756]);
+});
+
+test('hitTest finds a feature across the antimeridian', () => {
+  const [x, y] = project(180, -17);
+  const v: View = { cx: x, cy: y, zoom: 10, width: 1000, height: 500 };
+  const prepared = points(-179.9);
+  const s = 256 * 2 ** v.zoom;
+  const [px, py] = project(-179.9, -17);
+  // The point drawn east of the line, in the copy to the right of the centre.
+  const sx = (px + 1 - x) * s + v.width / 2;
+  const sy = (py - y) * s + v.height / 2;
+  assert.deepEqual(ids(hitTest(v, prepared, sx, sy)), ['node/0']);
+  // The point exactly on the seam, clicked from either side.
+  const seam = points(180);
+  assert.deepEqual(ids(hitTest(v, seam, v.width / 2 - 3, v.height / 2)), ['node/0']);
+  assert.deepEqual(ids(hitTest(v, seam, v.width / 2 + 3, v.height / 2)), ['node/0']);
 });
