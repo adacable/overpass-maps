@@ -87,9 +87,18 @@ export function closedWayIsArea(tags: Record<string, string> | undefined): boole
   return true;
 }
 
-function toPositions(geom: (LatLon | null)[] | undefined): Position[] {
-  if (!geom) return [];
-  return geom.filter((p): p is LatLon => !!p).map((p) => [p.lon, p.lat]);
+/**
+ * Inline geometry as runs of consecutive positions. Geometry cropped with
+ * `out geom(bbox)` has null for each vertex outside the box; joining across
+ * those gaps would draw edges that aren't there, so each gap starts a new run.
+ */
+function toRuns(geom: (LatLon | null)[]): Position[][] {
+  const runs: Position[][] = [[]];
+  for (const p of geom) {
+    if (p) runs[runs.length - 1].push([p.lon, p.lat]);
+    else if (runs[runs.length - 1].length) runs.push([]);
+  }
+  return runs.filter((r) => r.length);
 }
 
 function samePos(a: Position, b: Position): boolean {
@@ -130,7 +139,7 @@ export function assembleRings(segments: Position[][]): Position[][] {
   return rings;
 }
 
-export function pointInRing(p: Position, ring: Position[]): boolean {
+function pointInRing(p: Position, ring: Position[]): boolean {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const [xi, yi] = ring[i];
@@ -160,7 +169,10 @@ function centerPoint(el: Element): Geometry | null {
 export function osmToGeoJSON(data: OverpassResponse): FeatureCollection {
   const elements = data.elements ?? [];
   const nodes = new Map<number, Position>();
-  const ways = new Map<number, Position[]>();
+  /** Each way's geometry, as runs (more than one if it was cropped). */
+  const ways = new Map<number, Position[][]>();
+  /** Ways whose geometry was cropped by `out geom(bbox)`. */
+  const cropped = new Set<number>();
   const nodesInWays = new Set<number>();
   const membersOfRelations = new Set<string>();
 
@@ -171,10 +183,11 @@ export function osmToGeoJSON(data: OverpassResponse): FeatureCollection {
   }
   for (const el of elements) {
     if (el.type !== 'way') continue;
-    const coords = el.geometry
-      ? toPositions(el.geometry)
-      : (el.nodes ?? []).map((id) => nodes.get(id)).filter((p): p is Position => !!p);
-    if (coords.length) ways.set(el.id, coords);
+    if (el.geometry?.includes(null)) cropped.add(el.id);
+    const runs = el.geometry
+      ? toRuns(el.geometry)
+      : [(el.nodes ?? []).map((id) => nodes.get(id)).filter((p): p is Position => !!p)].filter((r) => r.length);
+    if (runs.length) ways.set(el.id, runs);
   }
 
   const features: Feature[] = [];
@@ -191,22 +204,27 @@ export function osmToGeoJSON(data: OverpassResponse): FeatureCollection {
         push(el, { type: 'Point', coordinates: pos });
       }
     } else if (el.type === 'way') {
-      const coords = ways.get(el.id);
-      if (!coords) {
+      const runs = ways.get(el.id);
+      if (!runs) {
         const center = centerPoint(el);
         if (center) push(el, center);
         continue;
       }
       if (!interesting(el.tags) && membersOfRelations.has(key)) continue;
-      if (coords.length === 1) push(el, { type: 'Point', coordinates: coords[0] });
-      else if (isClosed(coords) && closedWayIsArea(el.tags)) push(el, { type: 'Polygon', coordinates: [coords] });
+      const [coords] = runs;
+      if (runs.length > 1) push(el, { type: 'MultiLineString', coordinates: runs });
+      else if (coords.length === 1) push(el, { type: 'Point', coordinates: coords[0] });
+      // A cropped outline can't be filled correctly, so it's drawn as a line.
+      else if (isClosed(coords) && closedWayIsArea(el.tags) && !cropped.has(el.id)) push(el, { type: 'Polygon', coordinates: [coords] });
       else push(el, { type: 'LineString', coordinates: coords });
     } else if (el.type === 'relation') {
-      const memberWays = (el.members ?? [])
-        .filter((m) => m.type === 'way')
-        .map((m) => ({ role: m.role, coords: m.geometry ? toPositions(m.geometry) : ways.get(m.ref) ?? [] }))
+      const wayMembers = (el.members ?? []).filter((m) => m.type === 'way');
+      const memberWays = wayMembers
+        .flatMap((m) => (m.geometry ? toRuns(m.geometry) : ways.get(m.ref) ?? []).map((coords) => ({ role: m.role, coords })))
         .filter((m) => m.coords.length >= 2);
-      const isArea = el.tags?.type === 'multipolygon' || el.tags?.type === 'boundary';
+      // As for ways, a cropped area is drawn as its outline.
+      const isCropped = wayMembers.some((m) => m.geometry?.includes(null) || cropped.has(m.ref));
+      const isArea = (el.tags?.type === 'multipolygon' || el.tags?.type === 'boundary') && !isCropped;
       let geometry: Geometry | null = null;
       if (memberWays.length) {
         geometry = isArea
@@ -224,15 +242,27 @@ export function osmToGeoJSON(data: OverpassResponse): FeatureCollection {
 }
 
 const OUT_SETTING = /\[out:\w+[^\]]*\]/;
+/** Leading whitespace and comments, before the first statement. */
+const PREAMBLE = /^(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*/;
 
 /**
- * Make sure the query asks for JSON: adds a settings block if the query has no
- * `[out:...]`, and rewrites `[out:xml]`/`[out:csv(...)]` to `[out:json]`.
+ * Make sure the query asks for JSON: rewrites `[out:xml]`/`[out:csv(...)]` to
+ * `[out:json]`, adds `[out:json]` to a settings statement that lacks it, or
+ * adds a settings statement if there's none (a query can only have one).
  */
 export function normaliseQuery(query: string): string {
   const q = query.trim();
   if (OUT_SETTING.test(q)) return q.replace(OUT_SETTING, '[out:json]');
+  const start = PREAMBLE.exec(q)![0].length;
+  if (q[start] === '[') return `${q.slice(0, start)}[out:json]${q.slice(start)}`;
   return `[out:json][timeout:60];\n${q}`;
+}
+
+/** Overpass errors come back as an HTML page; pull out the message text. */
+export function overpassErrorText(body: string): string {
+  const matches = [...body.matchAll(/<strong[^>]*>\s*Error\s*<\/strong>:?\s*([^<]+)/gi)].map((m) => m[1].trim());
+  if (matches.length) return matches.join('; ');
+  return body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
 /** Fill in `{{bbox}}` and `{{center}}` placeholders, Overpass Turbo style. */

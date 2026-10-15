@@ -16,7 +16,6 @@
     "postinstall": "wxt prepare"
   },
   "devDependencies": {
-    "@types/geojson": "^7946.0.16",
     "@types/node": "^24.19.2",
     "typescript": "^5.9.3",
     "web-ext": "^10.7.0",

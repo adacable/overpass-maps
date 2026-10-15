@@ -1,18 +1,36 @@
 import { browser, defineBackground } from '#imports';
 import { isHttpsUrl } from '@/lib/matches.ts';
-import type { BackgroundRequest } from '@/lib/messages.ts';
-import { normaliseQuery, osmToGeoJSON, type OverpassResponse } from '@/lib/osm.ts';
+import { normaliseQuery, osmToGeoJSON, overpassErrorText, type OverpassResponse } from '@/lib/osm.ts';
 import { getSettings, resultsItem, statusItem } from '@/lib/storage.ts';
 
 /** Stay well inside Chrome's 10 MB storage.local quota (no unlimitedStorage). */
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
+/**
+ * Chrome stops an idle service worker after 30s, even mid-fetch, and Overpass
+ * sends nothing until the query finishes. Any extension API call resets that
+ * timer, so make one regularly while a query runs.
+ */
+const KEEP_ALIVE_MS = 20_000;
+
+const tooMuchData = (detail: string) => `Too much data (${detail}). Zoom in, lower the minimum query area, or narrow the query.`;
 
 export default defineBackground(() => {
   let current: AbortController | null = null;
 
+  // A status still "running" at startup belongs to a query that died with the
+  // previous background instance (e.g. the browser was closed mid-query).
+  void statusItem.getValue().then((s) => {
+    if (s.state === 'running' && !current) {
+      void statusItem.setValue({ state: 'error', message: 'The query was interrupted. Run it again.', finishedAt: Date.now() });
+    }
+  });
+
   async function run(query: string) {
     current?.abort();
     const controller = (current = new AbortController());
+    // Cancel / Clear / a newer query may arrive during any await below.
+    const superseded = () => current !== controller;
+    const keepAlive = setInterval(() => void browser.runtime.getPlatformInfo(), KEEP_ALIVE_MS);
     await statusItem.setValue({ state: 'running', startedAt: Date.now() });
     try {
       const { endpoint } = await getSettings();
@@ -28,35 +46,38 @@ export default defineBackground(() => {
         // errors, rate limiting) surface only as an opaque network error.
         throw new Error("Couldn't reach the Overpass server. It may be busy or down: try again shortly, or pick another endpoint in Settings.");
       });
-      if (!res.ok) throw new Error(`Overpass returned ${res.status}: ${extractError(await res.text())}`);
+      if (!res.ok) throw new Error(`Overpass returned ${res.status}: ${overpassErrorText(await res.text())}`);
       const data = (await res.json()) as OverpassResponse;
       // Overpass reports timeouts and memory limits as a remark on a 200 response.
       if (data.remark && /error/i.test(data.remark)) throw new Error(data.remark.trim());
       const fc = osmToGeoJSON(data);
-      if (controller.signal.aborted) return;
-      const size = JSON.stringify(fc).length;
-      if (size > MAX_RESULT_BYTES) {
-        throw new Error(`Too much data (${(size / 1048576).toFixed(1)} MB, ${fc.features.length} features). Zoom in, lower the minimum query area, or narrow the query.`);
-      }
-      await resultsItem.setValue(fc);
+      const bytes = new TextEncoder().encode(JSON.stringify(fc)).length;
+      if (bytes > MAX_RESULT_BYTES) throw new Error(tooMuchData(`${(bytes / 1048576).toFixed(1)} MB, ${fc.features.length} features`));
+      if (superseded()) return;
+      await resultsItem.setValue(fc).catch(() => {
+        throw new Error(tooMuchData('over the storage limit'));
+      });
+      if (superseded()) return;
       await statusItem.setValue({ state: 'done', count: fc.features.length, finishedAt: Date.now() });
     } catch (err) {
-      if (controller.signal.aborted) return;
+      if (superseded()) return;
       const message = err instanceof Error ? err.message : String(err);
       await statusItem.setValue({ state: 'error', message, finishedAt: Date.now() });
     } finally {
+      clearInterval(keepAlive);
       if (current === controller) current = null;
     }
   }
 
-  browser.runtime.onMessage.addListener((msg: BackgroundRequest, sender, sendResponse) => {
+  browser.runtime.onMessage.addListener((msg: unknown, sender, sendResponse) => {
     // Only our own pages (the popup) drive queries; content scripts report the
     // web page's URL as sender.url, so they're ignored.
     if (sender.id !== browser.runtime.id || !sender.url?.startsWith(browser.runtime.getURL('/'))) return;
-    if (msg?.type === 'runQuery' && typeof msg.query === 'string') {
-      void run(msg.query);
+    const req = msg as { type?: unknown; query?: unknown } | null;
+    if (req?.type === 'runQuery' && typeof req.query === 'string') {
+      void run(req.query);
       sendResponse({ ok: true });
-    } else if (msg?.type === 'cancelQuery') {
+    } else if (req?.type === 'cancelQuery') {
       current?.abort();
       current = null;
       void statusItem.setValue({ state: 'idle' });
@@ -64,10 +85,3 @@ export default defineBackground(() => {
     }
   });
 });
-
-/** Overpass errors come back as an HTML page; pull out the message text. */
-function extractError(body: string): string {
-  const matches = [...body.matchAll(/<strong[^>]*>\s*Error\s*<\/strong>:?\s*([^<]+)/gi)].map((m) => m[1].trim());
-  if (matches.length) return matches.join('; ');
-  return body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
-}

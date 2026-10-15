@@ -39,6 +39,9 @@ export default defineContentScript({
 
     const overlay = new Overlay();
     let scene: HTMLCanvasElement | null = null;
+    // Measured in layout(), not per frame: reading it in a camera event could
+    // force a layout in the middle of Google's frame.
+    let sceneSize = { width: 0, height: 0 };
 
     // Where the map is looking. Google's per-frame camera messages (see
     // camera-hook.ts) are exact, including during animations; the URL is the
@@ -52,8 +55,7 @@ export default defineContentScript({
     const mainVisible = () => !!view && !camera?.rotated && !urlRotated && haveSomethingToShow();
 
     function updateView() {
-      const width = scene?.clientWidth ?? 0;
-      const height = scene?.clientHeight ?? 0;
+      const { width, height } = sceneSize;
       if (!camera || !width || !height) {
         view = null;
         return;
@@ -74,6 +76,7 @@ export default defineContentScript({
         if (scene) resizeObserver.unobserve(scene);
         scene = found;
         if (scene) resizeObserver.observe(scene);
+        else sceneSize = { width: 0, height: 0 };
       }
       if (!scene) return;
       // Google stacks several canvases in the map container; sit above the
@@ -88,6 +91,7 @@ export default defineContentScript({
 
     function layout() {
       if (!scene) return;
+      sceneSize = { width: scene.clientWidth, height: scene.clientHeight };
       overlay.fitTo(scene);
       syncFromUrl();
       render();
@@ -97,7 +101,7 @@ export default defineContentScript({
 
     function syncFromUrl() {
       lastHref = location.href;
-      const cam = parseCamera(location.href, scene?.clientHeight ?? 0);
+      const cam = parseCamera(location.href, sceneSize.height);
       // 3D / Street View / rotated views are flagged in the URL; hide for those
       // even when camera messages are flowing.
       urlRotated = !!cam?.rotated;
@@ -146,14 +150,19 @@ export default defineContentScript({
       miniFrame = 0;
       if (!miniViewport?.isConnected) return watchMinimap();
       if (mini.host.nextElementSibling !== miniViewport) placeMini(miniViewport);
-      mini.fitTo(miniViewport);
-      // Tiles can be briefly unreadable while Google swaps them; keep the last
-      // view rather than blinking out.
-      miniView = readMinimapView(miniViewport) ?? miniView;
+      if (haveSomethingToShow()) {
+        // Read the tiles before fitTo writes, so there's at most one layout per frame.
+        miniView = readMiniView();
+        mini.fitTo(miniViewport);
+      }
       // Reading the tiles every frame is cheap; paint only redraws when something moved.
       mini.paint(miniVisible() ? miniView : null, features, settings.color);
       miniFrame = requestAnimationFrame(miniTick);
     }
+
+    // Tiles can be briefly unreadable while Google swaps them; keep the last
+    // view rather than blinking out.
+    const readMiniView = () => (miniViewport && readMinimapView(miniViewport)) ?? miniView;
 
     function placeMini(vp: HTMLElement) {
       // Just under the mini-map's input layer: sharing its z-index but earlier in
@@ -261,13 +270,14 @@ export default defineContentScript({
       render();
     });
 
-    const onMessage = (msg: GetViewRequest, _sender: unknown, sendResponse: (r: GetViewResponse) => void) => {
-      if (msg?.type !== 'getView') return;
+    const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: GetViewResponse) => void) => {
+      if ((msg as Partial<GetViewRequest> | null)?.type !== 'getView') return;
       syncFromUrl();
-      // In Street View, query around what the mini-map shows.
-      const v = urlRotated ? miniView : view;
+      // In Street View, query around what the mini-map shows. A tilted or
+      // rotated main map has no north-up rectangle to query.
+      const v = urlRotated ? readMiniView() : camera?.rotated ? null : view;
       if (!v) {
-        sendResponse({ ok: false, error: "Couldn't read the map position. Switch out of 3D and try again." });
+        sendResponse({ ok: false, error: "Couldn't read the map position. Leave 3D or reset the map's tilt and rotation, then try again." });
         return;
       }
       const [lng, lat] = unproject(v.cx, v.cy);

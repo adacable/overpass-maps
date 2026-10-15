@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assembleRings, fillPlaceholders, normaliseQuery, osmToGeoJSON } from '../lib/osm.ts';
+import { assembleRings, closedWayIsArea, fillPlaceholders, normaliseQuery, osmToGeoJSON, overpassErrorText } from '../lib/osm.ts';
 
 const g = (lon: number, lat: number) => ({ lon, lat });
 
@@ -102,4 +102,64 @@ test('normaliseQuery forces JSON output', () => {
 test('fillPlaceholders', () => {
   const q = fillPlaceholders('node({{bbox}}); node(around:100,{{ center }});', { south: 1, west: 2, north: 3, east: 4 }, { lat: 5, lng: 6 });
   assert.equal(q, 'node(1.000000,2.000000,3.000000,4.000000); node(around:100,5.000000,6.000000);');
+});
+
+test('normaliseQuery adds [out:json] to an existing settings statement', () => {
+  // Overpass allows only one settings statement, so it must not add a second.
+  assert.equal(normaliseQuery('[timeout:25][bbox:1,2,3,4];\nnode;out;'), '[out:json][timeout:25][bbox:1,2,3,4];\nnode;out;');
+  assert.equal(normaliseQuery('// cafes\n/* note */\n[timeout:25];\nnode;out;'), '// cafes\n/* note */\n[out:json][timeout:25];\nnode;out;');
+  assert.equal(normaliseQuery('// [timeout:5] in a comment\nnode;out;'), '[out:json][timeout:60];\n// [timeout:5] in a comment\nnode;out;');
+});
+
+test('closedWayIsArea', () => {
+  assert.equal(closedWayIsArea(undefined), true);
+  assert.equal(closedWayIsArea({ building: 'yes' }), true);
+  assert.equal(closedWayIsArea({ building: 'yes', area: 'no' }), false);
+  assert.equal(closedWayIsArea({ highway: 'service' }), false);
+  assert.equal(closedWayIsArea({ barrier: 'fence' }), false);
+  assert.equal(closedWayIsArea({ waterway: 'river' }), false);
+  assert.equal(closedWayIsArea({ waterway: 'riverbank' }), true);
+  assert.equal(closedWayIsArea({ natural: 'water' }), true);
+  assert.equal(closedWayIsArea({ natural: 'coastline' }), false);
+});
+
+test('cropped geometry (out geom(bbox)) is split at the gaps, never bridged', () => {
+  // A park outline cut by a narrow box: two runs, as Overpass returns them.
+  const geometry = [g(0, 0), g(1, 0), null, null, g(1, 1), g(0, 1), null, g(0, 0)];
+  const fc = osmToGeoJSON({ elements: [{ type: 'way', id: 1, tags: { leisure: 'park' }, geometry }] });
+  assert.deepEqual(fc.features[0].geometry, { type: 'MultiLineString', coordinates: [[[0, 0], [1, 0]], [[1, 1], [0, 1]], [[0, 0]]] });
+
+  // Cropped only at the ends: one run, but an open outline, so a line.
+  const ends = osmToGeoJSON({ elements: [{ type: 'way', id: 2, tags: { building: 'yes' }, geometry: [null, g(0, 0), g(1, 0), g(1, 1), null] }] });
+  assert.deepEqual(ends.features[0].geometry, { type: 'LineString', coordinates: [[0, 0], [1, 0], [1, 1]] });
+});
+
+test('a cropped multipolygon is drawn as outline pieces, not filled', () => {
+  const fc = osmToGeoJSON({
+    elements: [{
+      type: 'relation', id: 1, tags: { type: 'multipolygon', leisure: 'park' },
+      members: [{ type: 'way', ref: 1, role: 'outer', geometry: [g(0, 0), g(2, 0), null, g(2, 2), g(0, 2), g(0, 0)] }],
+    }],
+  });
+  assert.deepEqual(fc.features[0].geometry, { type: 'MultiLineString', coordinates: [[[0, 0], [2, 0]], [[2, 2], [0, 2], [0, 0]]] });
+});
+
+test('an inner ring outside every outer is dropped', () => {
+  const fc = osmToGeoJSON({
+    elements: [{
+      type: 'relation', id: 1, tags: { type: 'multipolygon' },
+      members: [
+        { type: 'way', ref: 1, role: 'outer', geometry: [g(0, 0), g(1, 0), g(1, 1), g(0, 0)] },
+        { type: 'way', ref: 2, role: 'inner', geometry: [g(5, 5), g(6, 5), g(6, 6), g(5, 5)] },
+      ],
+    }],
+  });
+  assert.deepEqual(fc.features[0].geometry, { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] });
+});
+
+test('overpassErrorText pulls the messages out of an error page', () => {
+  const page = '<html><body><p><strong style="color:#FF0000">Error</strong>: line 1: parse error: unknown type "nod" </p>' +
+    '<p><strong style="color:#FF0000">Error</strong>: line 1: static error: bad </p></body></html>';
+  assert.equal(overpassErrorText(page), 'line 1: parse error: unknown type "nod"; line 1: static error: bad');
+  assert.equal(overpassErrorText('<h1>Too Many Requests</h1>\n<p>slow down</p>'), 'Too Many Requests slow down');
 });

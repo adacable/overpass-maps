@@ -10,6 +10,7 @@ export class Overlay {
   /** What's on the canvas now, so unchanged frames aren't redrawn. */
   private drawnKey = '';
   private drawnFeatures: Prepared[] | null = null;
+  private placement = '';
 
   constructor() {
     const { host, root } = shadowHost('overpass-layer');
@@ -20,13 +21,16 @@ export class Overlay {
     this.host = host;
   }
 
-  /** Match position, size and pixel density to `target`. */
+  /** Match position, size and pixel density to `target`. Writes to the DOM only when something changed. */
   fitTo(target: HTMLElement): void {
     const w = target.clientWidth;
     const h = target.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    const placement = `${target.offsetLeft},${target.offsetTop},${w},${h},${dpr}`;
+    if (placement === this.placement) return;
+    this.placement = placement;
     Object.assign(this.host.style, { left: `${target.offsetLeft}px`, top: `${target.offsetTop}px`, width: `${w}px`, height: `${h}px` });
     // Resizing a canvas clears it, so only do it when the size really changed.
-    const dpr = window.devicePixelRatio || 1;
     const pw = Math.round(w * dpr);
     const ph = Math.round(h * dpr);
     if (this.canvas.width !== pw || this.canvas.height !== ph) {

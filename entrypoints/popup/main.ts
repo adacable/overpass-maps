@@ -1,7 +1,7 @@
 import { browser } from '#imports';
 import { isHttpsUrl, OVERPASS_ENDPOINTS } from '@/lib/matches.ts';
 import { expandBounds } from '@/lib/mercator.ts';
-import type { GetViewResponse } from '@/lib/messages.ts';
+import { requestView, sendToBackground, type GetViewResponse } from '@/lib/messages.ts';
 import { fillPlaceholders } from '@/lib/osm.ts';
 import { getSettings, queryItem, resultsItem, settingsItem, statusItem, type RunStatus, type Settings } from '@/lib/storage.ts';
 
@@ -47,11 +47,8 @@ endpointEl.addEventListener('change', () => {
   if (ok) void saveSettings({ endpoint: endpointEl.value });
 });
 
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
-queryEl.addEventListener('input', () => {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => void queryItem.setValue(queryEl.value), 300);
-});
+// Saved on every keystroke: the popup can close at any moment, taking any pending timer with it.
+queryEl.addEventListener('input', () => void queryItem.setValue(queryEl.value));
 queryEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
@@ -74,16 +71,14 @@ showStatus(await statusItem.getValue());
 statusItem.watch((s) => showStatus(s));
 
 runBtn.addEventListener('click', async () => {
-  clearTimeout(saveTimer);
-  const raw = queryEl.value;
-  void queryItem.setValue(raw);
-
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  let view: GetViewResponse;
+  let view: GetViewResponse | undefined;
   try {
-    view = await browser.tabs.sendMessage(tab.id!, { type: 'getView' });
-    if (!view) throw new Error();
+    if (tab?.id !== undefined) view = await requestView(tab.id);
   } catch {
+    // No content script in this tab.
+  }
+  if (!view) {
     return showStatus(
       { state: 'idle' },
       'Open Google Maps in this tab first. If it is already open, reload the page (needed after installing the extension).',
@@ -92,14 +87,14 @@ runBtn.addEventListener('click', async () => {
   if (!view.ok) return showStatus({ state: 'idle' }, view.error);
 
   const bbox = expandBounds(view.bounds, settings.minBboxKm);
-  const query = fillPlaceholders(raw, bbox, view.center);
-  await browser.runtime.sendMessage({ type: 'runQuery', query });
+  const query = fillPlaceholders(queryEl.value, bbox, view.center);
+  await sendToBackground({ type: 'runQuery', query });
 });
 
-cancelBtn.addEventListener('click', () => void browser.runtime.sendMessage({ type: 'cancelQuery' }));
+cancelBtn.addEventListener('click', () => void sendToBackground({ type: 'cancelQuery' }));
 
 clearBtn.addEventListener('click', async () => {
-  await browser.runtime.sendMessage({ type: 'cancelQuery' });
+  await sendToBackground({ type: 'cancelQuery' });
   await resultsItem.setValue(null);
   await statusItem.setValue({ state: 'idle' });
 });

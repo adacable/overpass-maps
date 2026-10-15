@@ -8,9 +8,18 @@ import { CAMERA_EVENT, decodeCamera } from './camera-proto.ts';
  * Chrome loads this as a MAIN-world content script; Firefox (MV2 has no MAIN
  * world) injects it as a <script> from maps.content.ts.
  */
+/**
+ * Marks our wrapper, so a second install is skipped: Firefox re-runs content
+ * scripts in open tabs when the extension updates, and the old wrapper is
+ * still in place and still working. (The wrapper is visible to the page
+ * anyway, so the mark gives nothing away.)
+ */
+const HOOKED = Symbol.for('overpass-maps.hook');
+
 export function installCameraHook(): void {
   const proto = Worker.prototype;
   const original = proto.postMessage;
+  if (HOOKED in original) return;
   proto.postMessage = function (this: Worker, message: unknown, ...rest: unknown[]) {
     try {
       const m = message as { command?: unknown; methodType?: unknown; payload?: unknown } | null;
@@ -25,4 +34,5 @@ export function installCameraHook(): void {
     }
     return (original as (...a: unknown[]) => void).call(this, message, ...rest);
   } as Worker['postMessage'];
+  Object.defineProperty(proto.postMessage, HOOKED, { value: true });
 }

@@ -67,7 +67,8 @@ export function readMinimapView(viewport: HTMLElement): View | null {
       if (!tile) continue;
       const rect = img.getBoundingClientRect();
       if (!rect.width) continue;
-      // During a zoom animation old and new tiles overlap; prefer the newest zoom.
+      // During a zoom animation tiles of two zoom levels overlap, all placed
+      // consistently; the highest zoom gives the most precise position.
       if (!best || tile.zoom > best.tile.zoom) best = { tile, rect };
     }
     if (best) return viewFromTile(best.tile, best.rect, vr);

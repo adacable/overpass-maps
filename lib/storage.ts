@@ -16,7 +16,7 @@ export type RunStatus =
   | { state: 'done'; count: number; finishedAt: number }
   | { state: 'error'; message: string; finishedAt: number };
 
-export const DEFAULT_QUERY = `// {{bbox}} is the visible map area, grown to the minimum size set below.
+const DEFAULT_QUERY = `// {{bbox}} is the visible map area, grown to the minimum size set below.
 nwr["amenity"="cafe"]({{bbox}});
 out geom;`;
 

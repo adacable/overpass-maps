@@ -85,7 +85,7 @@ export function decodeCamera(payload: Uint8Array): MapCamera | null {
 }
 
 /** Whether `c` is a camera with a plausible position and zoom. */
-export function isValidCamera(c: unknown): c is MapCamera {
+function isValidCamera(c: unknown): c is MapCamera {
   const cam = c as Partial<MapCamera> | null;
   const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
   return (
