@@ -1,24 +1,16 @@
 import { defineConfig } from 'wxt';
-import { MAPS_MATCHES, OVERPASS_HOST_PERMISSIONS } from './lib/matches.ts';
-
-// web_accessible_resources only accepts origin-level patterns (path must be /*).
-const MAPS_ORIGINS = [...new Set(MAPS_MATCHES.map((m) => `${new URL(m.replace('*', '')).origin}/*`))];
-
-// Requested at runtime only if you configure a custom Overpass endpoint.
-const OPTIONAL_HOSTS = ['https://*/*'];
 
 export default defineConfig({
-  manifest: ({ manifestVersion }) => ({
+  manifest: ({ browser }) => ({
     name: 'Overpass Maps',
     description: 'Overlay Overpass API query results on Google Maps.',
-    permissions: ['storage', 'unlimitedStorage'],
-    host_permissions: OVERPASS_HOST_PERMISSIONS,
-    // WXT doesn't translate optional host permissions down to MV2 (Firefox).
-    ...(manifestVersion === 3 ? { optional_host_permissions: OPTIONAL_HOSTS } : { optional_permissions: OPTIONAL_HOSTS }),
+    // No host permissions: Overpass allows cross-origin requests (CORS), and
+    // Google Maps access comes from the content-script matches.
+    permissions: ['storage'],
     action: { default_title: 'Overpass Maps' },
-    // The camera hook is injected into the Maps page as a <script src>.
-    web_accessible_resources:
-      manifestVersion === 3 ? [{ resources: ['camera-hook.js'], matches: MAPS_ORIGINS }] : ['camera-hook.js'],
+    // Firefox MV2 has no MAIN-world content scripts, so its camera hook is
+    // injected as a <script>; moz-extension:// URLs are random per install.
+    ...(browser === 'firefox' ? { web_accessible_resources: ['camera-hook.js'] } : {}),
     browser_specific_settings: {
       gecko: { id: 'overpass-maps@extension' },
     },

@@ -40,8 +40,13 @@ minBboxEl.addEventListener('change', () => {
 });
 colorEl.addEventListener('input', () => void saveSettings({ color: colorEl.value }));
 visibleEl.addEventListener('change', () => void saveSettings({ visible: visibleEl.checked }));
+const isHttps = (v: string) => URL.canParse(v) && new URL(v).protocol === 'https:';
 endpointEl.addEventListener('change', () => {
-  if (endpointEl.checkValidity() && endpointEl.value) void saveSettings({ endpoint: endpointEl.value });
+  // https only: queries reveal where you're looking on the map.
+  const ok = isHttps(endpointEl.value);
+  endpointEl.setCustomValidity(ok ? '' : 'Use an https:// Overpass endpoint.');
+  endpointEl.reportValidity();
+  if (ok) void saveSettings({ endpoint: endpointEl.value });
 });
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -74,13 +79,6 @@ runBtn.addEventListener('click', async () => {
   clearTimeout(saveTimer);
   const raw = queryEl.value;
   void queryItem.setValue(raw);
-
-  // Custom endpoints need host permission; must be requested from the click itself.
-  if (!OVERPASS_ENDPOINTS.includes(settings.endpoint)) {
-    const origin = new URL(settings.endpoint).origin;
-    const granted = await browser.permissions.request({ origins: [`${origin}/*`] });
-    if (!granted) return showStatus({ state: 'idle' }, `Permission to access ${origin} was not granted.`);
-  }
 
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   let view: GetViewResponse;

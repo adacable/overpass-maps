@@ -24,6 +24,25 @@ without the extension.
 5. In Street View, results are drawn on the mini-map, both the small one and
    the half-screen expanded one. Running a query there uses the mini-map's area.
 
+## Permissions and privacy
+
+- **Permissions:** only `storage`, plus access to Google Maps pages through
+  the content-script matches. There are no host permissions: Overpass servers
+  allow cross-origin requests (CORS). If a server is down or rate-limiting,
+  its error has no CORS headers, so you get a generic "couldn't reach the
+  server" message.
+- **What leaves the browser:** the query, the queried area (where you're
+  looking) and your IP address go to the configured Overpass endpoint, which
+  must be https. Nothing goes anywhere else.
+- **What Google's page can see:** the overlays and the details card live in
+  closed shadow roots, so page scripts can't read the drawn results or tag
+  values. The page can still tell the extension is present: from the
+  `<overpass-layer>`/`<overpass-card>` elements, the camera events, and the
+  wrapped `Worker.postMessage`.
+- **Inputs are untrusted:** camera events from the page are range-checked;
+  OSM tag values are only ever inserted as text; only the popup's own page
+  can start a query; results over 8 MB are refused rather than stored.
+
 ## Develop
 
 ```sh
@@ -55,9 +74,10 @@ camera itself:
 - **Camera, per frame:** Google draws the map in a worker thread
   (`OffscreenCanvas`), and on every frame the main thread posts the camera to
   that worker as a protobuf (`{command: 9, methodType: 8, payload}`).
-  `entrypoints/camera-hook.ts` runs in the page, wraps `Worker.postMessage`
+  `lib/camera-hook.ts` runs in the page, wraps `Worker.postMessage`
   without changing anything, decodes lat/lng/zoom (`lib/camera-proto.ts`) and
-  re-sends them as a DOM event. The overlay redraws in that same frame, so it
+  re-sends them as a DOM event. Chrome loads it as a MAIN-world content script;
+  Firefox (MV2 has no MAIN world) injects it as a web-accessible `<script>`. The overlay redraws in that same frame, so it
   follows drags, momentum, zoom easing, buttons and fly-tos exactly.
 - **Fallback:** until the first camera message arrives, or if Google changes
   that message format, the camera is read from the URL (`@lat,lng,zoomz`). In

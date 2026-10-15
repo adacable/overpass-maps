@@ -60,7 +60,7 @@ function subtitle(f: Prepared): string {
 }
 
 export class FeatureCard {
-  private host = document.createElement('overpass-maps-card');
+  private host = document.createElement('overpass-card'); // not a div: Google re-lays-out stray divs
   private root = this.host.attachShadow({ mode: 'closed' });
   private card = el('div', { className: 'card' });
   private features: Prepared[] = [];
