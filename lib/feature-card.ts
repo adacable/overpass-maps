@@ -1,5 +1,6 @@
 import { shadowHost } from './dom.ts';
 import type { Prepared } from './render.ts';
+import { tagLinks } from './tag-links.ts';
 
 // A small card showing a feature's OSM tags, shown where the user clicked.
 // Tag values come from OSM and are untrusted: only ever inserted as text, never as HTML.
@@ -45,7 +46,6 @@ const STYLE = `
   }
 `;
 
-const URL_KEYS = new Set(['website', 'url', 'contact:website', 'image']);
 const PRIMARY_KEYS = ['amenity', 'shop', 'tourism', 'leisure', 'building', 'highway', 'railway', 'landuse', 'natural', 'historic', 'man_made', 'office', 'craft', 'boundary', 'place'];
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...children: (Node | string)[]) {
@@ -55,7 +55,14 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 }
 
 function link(href: string, text: string) {
-  return el('a', { href, target: '_blank', rel: 'noopener noreferrer', textContent: text });
+  // tel: and mailto: hand off to an app; a new tab would just be left blank.
+  const tab = /^https?:/i.test(href) ? { target: '_blank', rel: 'noopener noreferrer' } : {};
+  return el('a', { href, ...tab, textContent: text });
+}
+
+function tagValue(k: string, v: string): (Node | string)[] {
+  const links = tagLinks(k, v);
+  return links ? links.flatMap((l, i) => (i ? ['; ', link(l.href, l.text)] : [link(l.href, l.text)])) : [v];
 }
 
 function button(text: string, label: string, onclick: () => void, disabled = false) {
@@ -129,8 +136,7 @@ export class FeatureCard {
   private render(): void {
     const f = this.features[this.index];
     const rows = Object.entries(f.tags).map(([k, v]) => {
-      const value = URL_KEYS.has(k) && /^https?:\/\//i.test(v) ? link(v, v) : v;
-      return el('tr', {}, el('td', { className: 'k', textContent: k }), el('td', {}, value));
+      return el('tr', {}, el('td', { className: 'k', textContent: k }), el('td', {}, ...tagValue(k, v)));
     });
     const tags = el('div', { className: 'tags' }, rows.length ? el('table', {}, ...rows) : el('div', { className: 'empty', textContent: 'No tags' }));
 
