@@ -1,0 +1,7 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "compilerOptions": {
+    // Geometry code indexes arrays constantly; this adds noise rather than safety.
+    "noUncheckedIndexedAccess": false
+  }
+}

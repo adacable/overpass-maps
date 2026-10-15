@@ -1,0 +1,25 @@
+{
+  "name": "overpass-maps",
+  "description": "Overlay Overpass API query results on Google Maps",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts",
+    "postinstall": "wxt prepare"
+  },
+  "devDependencies": {
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3",
+    "web-ext": "^10.7.0",
+    "wxt": "^0.21.4"
+  }
+}
