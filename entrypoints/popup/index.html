@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Overpass Maps</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <label for="query" class="label">Overpass query</label>
+      <textarea id="query" spellcheck="false" rows="9"></textarea>
+      <p class="hint"><code>{{bbox}}</code> = map view (at least the minimum size below), <code>{{center}}</code> = map centre</p>
+
+      <div class="actions">
+        <button id="run" class="primary">Run</button>
+        <button id="cancel" hidden>Cancel</button>
+        <button id="clear">Clear</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+
+      <fieldset>
+        <legend>Settings</legend>
+        <label class="row">
+          <span>Minimum query area</span>
+          <span><input id="minBboxKm" type="number" min="0" step="0.5" /> km</span>
+        </label>
+        <label class="row">
+          <span>Colour</span>
+          <input id="color" type="color" />
+        </label>
+        <label class="row">
+          <span>Show overlay</span>
+          <input id="visible" type="checkbox" />
+        </label>
+        <label class="stack">
+          <span>Overpass endpoint</span>
+          <input id="endpoint" type="url" list="endpoints" />
+          <datalist id="endpoints"></datalist>
+        </label>
+      </fieldset>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
