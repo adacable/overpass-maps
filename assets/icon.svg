@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Overpass Maps icon: an OSM area with its vertices, inside the query's braces.
+       assets/icon-16.svg is the hand-simplified toolbar size. PNGs in public/icon/. -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#1c2230"/>
+  <path d="M42 28 C30 28 30 35 30 44 V55 C30 61 27 64 20 64 C27 64 30 67 30 73 V82 C30 91 30 98 42 98 M86 28 C98 28 98 35 98 44 V55 C98 61 101 64 108 64 C101 64 98 67 98 73 V82 C98 91 98 98 86 98" fill="none" stroke="#f2f4f7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M48.9 73.8 L57.3 51.4 L78.3 47.2 L81.1 69.6 L64.3 80.8 Z" fill="#a9abf2" fill-opacity=".5" stroke="#a9abf2" stroke-width="5" stroke-linejoin="round"/>
+  <g fill="#f2f4f7"><circle cx="57.3" cy="51.4" r="5"/><circle cx="81.1" cy="69.6" r="5"/><circle cx="48.9" cy="73.8" r="5"/></g>
+</svg>
