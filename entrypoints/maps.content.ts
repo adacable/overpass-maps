@@ -19,6 +19,8 @@ const CLICK_MAX_MS = 600;
 
 /** How long after a feature click to withhold the mouseup / click / dblclick that follow. */
 const SWALLOW_MS = 400;
+/** How far the replayed release moves, past Google's click slop (Firefox only). */
+const DRAG_NUDGE_PX = 20;
 
 function swallow(e: Event) {
   e.stopImmediatePropagation();
@@ -275,10 +277,26 @@ export default defineContentScript({
       card.show(hits, e.clientX, e.clientY, settings.color);
     }, capture);
 
-    for (const type of ['mouseup', 'click', 'dblclick']) {
-      ctx.addEventListener(window, type, (e: Event) => {
-        if (e.timeStamp < swallowUntil && !card.contains(e)) swallow(e);
+    for (const type of ['mouseup', 'click', 'dblclick'] as const) {
+      ctx.addEventListener(window, type, (e: MouseEvent) => {
+        if (!e.isTrusted || e.timeStamp >= swallowUntil || card.contains(e)) return;
+        swallow(e);
+        if (import.meta.env.FIREFOX && type === 'mouseup') endGoogleDrag(e);
       }, capture);
+    }
+
+    // In Firefox, Google's map follows the mouse from mousedown until a mouseup,
+    // and opens its own panel on a mouseup that hasn't moved. Withholding the
+    // mouseup left the map stuck to the cursor, so replay the release as the end
+    // of a small drag: Google then lets go without opening its panel, and
+    // doesn't pan. (In Chrome it uses pointer events and this would open the panel.)
+    function endGoogleDrag(up: MouseEvent) {
+      const fire = (type: string, buttons: number) => up.target?.dispatchEvent(new MouseEvent(type, {
+        bubbles: true, cancelable: true, composed: true, view: window, button: 0, buttons,
+        clientX: up.clientX + DRAG_NUDGE_PX, clientY: up.clientY, screenX: up.screenX + DRAG_NUDGE_PX, screenY: up.screenY,
+      }));
+      fire('mousemove', 1);
+      fire('mouseup', 0);
     }
 
     ctx.addEventListener(window, 'keydown', (e: KeyboardEvent) => {
