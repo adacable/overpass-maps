@@ -73,7 +73,27 @@ function dotAt(f: Prepared, ws: number): [number, number] | null {
   return null;
 }
 
-export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepared[], color: string): void {
+/** Add `f`'s outline to the current path, for the copy of the world whose x = 0 is at screen `kx`. */
+function trace(ctx: CanvasRenderingContext2D, f: Prepared, ws: number, kx: number, oy: number): void {
+  for (const p of f.parts) {
+    ctx.moveTo(p[0] * ws + kx, p[1] * ws + oy);
+    for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * ws + kx, p[i + 1] * ws + oy);
+    if (f.kind === 'polygon') ctx.closePath();
+  }
+}
+
+function dot(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number): void {
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+/**
+ * Draw `features` as seen in `view`. `highlighted` features (hovered, or the
+ * one whose card is open) are drawn again on top with a bold outline.
+ */
+export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepared[], color: string, highlighted: readonly Prepared[] = []): void {
   const dpr = ctx.canvas.width / Math.max(1, view.width);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -90,7 +110,10 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepar
 
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
   const dots: [number, number][] = [];
+  const emphasis: (() => void)[] = [];
 
   // The world repeats east and west of itself (zoomed far out, or panned
   // across ±180°): draw every copy in view.
@@ -98,20 +121,31 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepar
     const kx = ox + copy * ws;
     for (const f of features) {
       if (f.maxX + copy < vMinX || f.minX + copy > vMaxX || f.maxY < vMinY || f.minY > vMaxY) continue;
-      const dot = dotAt(f, ws);
-      if (dot) {
-        dots.push([dot[0] * ws + kx, dot[1] * ws + oy]);
+      const at = dotAt(f, ws);
+      const x = at && at[0] * ws + kx;
+      const y = at && at[1] * ws + oy;
+      if (highlighted.includes(f)) {
+        emphasis.push(() => {
+          if (at) return dot(ctx, x!, y!, POINT_RADIUS + 2);
+          ctx.beginPath();
+          trace(ctx, f, ws, kx, oy);
+          // A white casing under a heavier stroke stands out on any map style.
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 8;
+          ctx.stroke();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 4.5;
+          ctx.stroke();
+        });
+      }
+      if (at) {
+        dots.push([x!, y!]);
         continue;
       }
       ctx.beginPath();
-      for (const p of f.parts) {
-        ctx.moveTo(p[0] * ws + kx, p[1] * ws + oy);
-        for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * ws + kx, p[i + 1] * ws + oy);
-        if (f.kind === 'polygon') ctx.closePath();
-      }
+      trace(ctx, f, ws, kx, oy);
       if (f.kind === 'polygon') {
         ctx.globalAlpha = 0.25;
-        ctx.fillStyle = color;
         ctx.fill('evenodd');
         ctx.globalAlpha = 0.9;
         ctx.lineWidth = 2;
@@ -119,20 +153,20 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepar
         ctx.globalAlpha = 0.85;
         ctx.lineWidth = 3;
       }
-      ctx.strokeStyle = color;
       ctx.stroke();
     }
   }
 
   ctx.globalAlpha = 1;
-  ctx.fillStyle = color;
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.5;
-  for (const [x, y] of dots) {
-    ctx.beginPath();
-    ctx.arc(x, y, POINT_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+  for (const [x, y] of dots) dot(ctx, x, y, POINT_RADIUS);
+
+  // Highlights last, so nothing covers them. Dots get a thicker ring.
+  for (const paint of emphasis) {
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    paint();
   }
 }
 

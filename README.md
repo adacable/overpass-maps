@@ -2,26 +2,33 @@
 
 Browser extension (Chrome + Firefox) that draws the results of an
 [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) query on top
-of Google Maps. The overlay ignores clicks, so the map works exactly as it would
-without the extension.
+of Google Maps. The map keeps working as normal: only clicks on a drawn
+feature are taken over, to show its details.
 
 ## Use
 
 1. Open Google Maps.
-2. Click the extension icon, write a query, then click **Run** (or press Ctrl/⌘+Enter).
-   - `{{bbox}}` is replaced with the visible map area. If that area is smaller
-     than **Minimum query area** (km, per side), it is grown around the centre
-     first. This keeps a zoomed-in query from returning almost nothing.
-   - `{{center}}` is replaced with `lat,lng` of the map centre.
+2. Click the extension icon, write a query, then click **Run query** (or press
+   Ctrl/⌘+Enter). The line under the editor shows what the placeholders will
+   be for the current map:
+   - `{{bbox}}` is the map view. If that's smaller than the minimum in
+     **Settings** (“Search at least … km across”), it is grown around the
+     centre first, so a zoomed-in query doesn't come back almost empty.
+   - `{{center}}` is the `lat,lng` of the map centre.
    - Output is forced to JSON. Use `out geom;` for full shapes, or
      `out center;` for just points.
-3. Results stay on the map, in every Google Maps tab, until you click **Clear**.
-4. Click a highlighted feature to see its OSM tags, with a link to it on
-   openstreetmap.org. Only clicks on a feature are taken over: Google's own
-   place panel doesn't open, and drags that start on a feature still pan the
-   map. Use ‹ › to step through overlapping features. Close the card with
-   Esc, ✕, or by clicking elsewhere.
-5. In Street View, results are drawn on the mini-map, both the small one and
+3. While a query runs, the popup shows the server and the time taken, and the
+   toolbar badge shows “…”; when it's done, the badge shows the feature count.
+   If a server is down or busy, the error offers the next server in one click.
+4. Results stay on the map, in every Google Maps tab, until you click
+   **Clear**. **Hide** / **Show** toggles them, **Zoom to** moves the map to fit
+   them (this reloads the page), and the colour swatch sets their colour.
+5. Hovering over a feature outlines it. Click it to see its OSM tags, with a
+   link to it on openstreetmap.org; it stays outlined while its card is open.
+   Google's own place panel doesn't open, and drags that start on a feature
+   still pan the map. Use ‹ › to step through overlapping features. Close the
+   card with Esc, ✕, or by clicking elsewhere.
+6. In Street View, results are drawn on the mini-map, both the small one and
    the half-screen expanded one. Running a query there uses the mini-map's area.
 
 ## Permissions and privacy

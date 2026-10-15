@@ -9,9 +9,20 @@ export type GetViewResponse =
   | { ok: true; bounds: Bounds; center: { lat: number; lng: number } }
   | { ok: false; error: string };
 
+export interface ZoomToResultsRequest {
+  type: 'zoomToResults';
+}
+export type TabRequest = GetViewRequest | ZoomToResultsRequest;
+export type TabResponse = GetViewResponse | { ok: boolean };
+
 /** Ask the Google Maps tab where it's looking; undefined if no content script answers. */
 export function requestView(tabId: number): Promise<GetViewResponse | undefined> {
   return browser.tabs.sendMessage(tabId, { type: 'getView' } satisfies GetViewRequest);
+}
+
+/** Move the map in the tab to fit the results (reloads the page). */
+export function zoomToResults(tabId: number): Promise<{ ok: boolean } | undefined> {
+  return browser.tabs.sendMessage(tabId, { type: 'zoomToResults' } satisfies ZoomToResultsRequest);
 }
 
 // popup -> background

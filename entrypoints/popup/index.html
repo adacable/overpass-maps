@@ -8,37 +8,49 @@
   </head>
   <body>
     <main>
-      <label for="query" class="label">Overpass query</label>
-      <textarea id="query" spellcheck="false" rows="9"></textarea>
-      <p class="hint"><code>{{bbox}}</code> = map view (at least the minimum size below), <code>{{center}}</code> = map centre</p>
-
-      <div class="actions">
-        <button id="run" class="primary">Run</button>
-        <button id="cancel" hidden>Cancel</button>
-        <button id="clear">Clear</button>
+      <div class="editor">
+        <!-- Mirrors the textarea's text so {{tokens}} can be highlighted behind it. -->
+        <div class="backdrop" aria-hidden="true"><div id="highlights"></div></div>
+        <textarea id="query" spellcheck="false" aria-label="Overpass query" aria-describedby="tokens"></textarea>
       </div>
-      <p id="status" class="status" role="status"></p>
 
-      <fieldset>
-        <legend>Settings</legend>
-        <label class="row">
-          <span>Minimum query area</span>
-          <span><input id="minBboxKm" type="number" min="0" step="0.5" /> km</span>
-        </label>
-        <label class="row">
-          <span>Colour</span>
-          <input id="color" type="color" />
-        </label>
-        <label class="row">
-          <span>Show overlay</span>
-          <input id="visible" type="checkbox" />
-        </label>
-        <label class="stack">
-          <span>Overpass endpoint</span>
-          <input id="endpoint" type="url" list="endpoints" pattern="https://.*" />
-          <datalist id="endpoints"></datalist>
-        </label>
-      </fieldset>
+      <div class="body">
+        <p id="tokens" class="tokens"></p>
+
+        <div class="run-row">
+          <button id="run" class="run">Run query <kbd id="shortcut"></kbd></button>
+          <p id="activity" class="activity" role="status"></p>
+        </div>
+
+        <div class="legend">
+          <label class="swatch" title="Overlay colour">
+            <input id="color" type="color" aria-label="Overlay colour" />
+          </label>
+          <p id="results" class="results"></p>
+          <div class="legend-actions">
+            <button id="zoom" class="text">Zoom to</button>
+            <button id="toggle" class="text"></button>
+            <button id="clear" class="text">Clear</button>
+          </div>
+        </div>
+
+        <details id="settings">
+          <summary>Settings</summary>
+          <div class="settings">
+            <label class="inline">
+              Search at least <input id="minBboxKm" type="number" min="0" step="0.5" /> km across
+            </label>
+            <label class="stack">
+              Overpass server
+              <select id="server"></select>
+            </label>
+            <label class="stack" id="custom-row" hidden>
+              Server address
+              <input id="endpoint" type="url" pattern="https://.*" placeholder="https://…/api/interpreter" />
+            </label>
+          </div>
+        </details>
+      </div>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

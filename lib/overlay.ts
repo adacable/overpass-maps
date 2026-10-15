@@ -10,6 +10,7 @@ export class Overlay {
   /** What's on the canvas now, so unchanged frames aren't redrawn. */
   private drawnKey = '';
   private drawnFeatures: Prepared[] | null = null;
+  private drawnHighlighted: readonly Prepared[] = [];
   private placement = '';
 
   constructor() {
@@ -40,15 +41,17 @@ export class Overlay {
   }
 
   /** Draw `features` as seen in `view`, or hide if `view` is null. Skips the draw when nothing changed. */
-  paint(view: View | null, features: Prepared[], color: string): void {
+  paint(view: View | null, features: Prepared[], color: string, highlighted: readonly Prepared[] = []): void {
     this.host.style.display = view ? '' : 'none';
     if (!view) return;
     const { width, height } = this.canvas;
     const key = `${view.cx},${view.cy},${view.zoom},${view.width},${view.height},${width},${height},${color}`;
-    if (key === this.drawnKey && features === this.drawnFeatures) return;
+    const sameHighlights = highlighted.length === this.drawnHighlighted.length && highlighted.every((f, i) => f === this.drawnHighlighted[i]);
+    if (key === this.drawnKey && features === this.drawnFeatures && sameHighlights) return;
     this.drawnKey = key;
     this.drawnFeatures = features;
-    draw(this.ctx, view, features, color);
+    this.drawnHighlighted = highlighted;
+    draw(this.ctx, view, features, color, highlighted);
   }
 
   /** Make the next paint draw even if nothing changed. */

@@ -4,11 +4,11 @@ import { largest } from '@/lib/dom.ts';
 import { FeatureCard } from '@/lib/feature-card.ts';
 import { parseCamera } from '@/lib/gmaps-url.ts';
 import { MAPS_MATCHES } from '@/lib/matches.ts';
-import { project, unproject, viewBounds, type View } from '@/lib/mercator.ts';
-import type { GetViewRequest, GetViewResponse } from '@/lib/messages.ts';
+import { project, TILE_SIZE, unproject, viewBounds, type View } from '@/lib/mercator.ts';
+import type { TabRequest, TabResponse } from '@/lib/messages.ts';
 import { findMinimapViewport, readMinimapView } from '@/lib/minimap.ts';
 import { Overlay } from '@/lib/overlay.ts';
-import { hitTest, prepare } from '@/lib/render.ts';
+import { hitTest, prepare, type Prepared } from '@/lib/render.ts';
 import { getSettings, resultsItem, watchSettings } from '@/lib/storage.ts';
 
 const URL_POLL_MS = 100;
@@ -32,8 +32,12 @@ export default defineContentScript({
   async main(ctx) {
     let settings = await getSettings();
     let features = prepare(await resultsItem.getValue());
-    const card = new FeatureCard();
+    // Repaint when the card changes feature, so the map highlights the one on show.
+    const card = new FeatureCard(() => render());
     const haveSomethingToShow = () => settings.visible && features.length > 0;
+    /** The feature under the pointer, outlined as a hint that it can be clicked. */
+    let hovered: Prepared | null = null;
+    const highlighted = () => [card.selected, hovered].filter((f, i, all): f is Prepared => !!f && all.indexOf(f) === i);
 
     // ===== Main map =========================================================
 
@@ -64,7 +68,7 @@ export default defineContentScript({
       view = { cx, cy, zoom: camera.zoom, width, height };
     }
 
-    const render = () => overlay.paint(mainVisible() ? view : null, features, settings.color);
+    const render = () => overlay.paint(mainVisible() ? view : null, features, settings.color, highlighted());
 
     const resizeObserver = new ResizeObserver(() => layout());
 
@@ -156,7 +160,7 @@ export default defineContentScript({
         mini.fitTo(miniViewport);
       }
       // Reading the tiles every frame is cheap; paint only redraws when something moved.
-      mini.paint(miniVisible() ? miniView : null, features, settings.color);
+      mini.paint(miniVisible() ? miniView : null, features, settings.color, highlighted());
       miniFrame = requestAnimationFrame(miniTick);
     }
 
@@ -222,6 +226,30 @@ export default defineContentScript({
       return [];
     }
 
+    function setHovered(f: Prepared | null) {
+      if (f === hovered) return;
+      hovered = f;
+      render(); // the mini-map picks it up on its next frame
+    }
+
+    // Hit-test at most once a frame, against the latest pointer position.
+    let lastMove: PointerEvent | null = null;
+    let hoverFrame = 0;
+    ctx.addEventListener(window, 'pointermove', (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
+      lastMove = e;
+      hoverFrame ||= requestAnimationFrame(() => {
+        hoverFrame = 0;
+        const m = lastMove!;
+        // Not while a button is down: that's a drag of the map.
+        setHovered(m.buttons ? null : featuresAt(m.target, m.clientX, m.clientY)[0] ?? null);
+      });
+    }, { capture: true, passive: true });
+    // Leaving the window: no relatedTarget.
+    ctx.addEventListener(window, 'pointerout', (e: PointerEvent) => {
+      if (!e.relatedTarget) setHovered(null);
+    });
+
     let press: { id: number; x: number; y: number; t: number } | null = null;
     let swallowUntil = 0;
     const capture = { capture: true };
@@ -262,6 +290,7 @@ export default defineContentScript({
     // The mini-map repaints itself every frame; only the main map needs a nudge.
     const unwatchResults = resultsItem.watch((fc) => {
       features = prepare(fc);
+      hovered = null;
       card.close();
       render();
     });
@@ -270,8 +299,33 @@ export default defineContentScript({
       render();
     });
 
-    const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: GetViewResponse) => void) => {
-      if ((msg as Partial<GetViewRequest> | null)?.type !== 'getView') return;
+    /** Move the map to fit the results. Google only takes a new camera by URL, so this reloads the page. */
+    function zoomToResults(): boolean {
+      if (!features.length) return false;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const f of features) {
+        minX = Math.min(minX, f.minX);
+        minY = Math.min(minY, f.minY);
+        maxX = Math.max(maxX, f.maxX);
+        maxY = Math.max(maxY, f.maxY);
+      }
+      const width = sceneSize.width || window.innerWidth;
+      const height = sceneSize.height || window.innerHeight;
+      // Leave a margin, and don't zoom further in than a street.
+      const fit = Math.min((width * 0.8) / ((maxX - minX) * TILE_SIZE), (height * 0.8) / ((maxY - minY) * TILE_SIZE));
+      const zoom = Math.max(2, Math.min(17, Math.log2(fit)));
+      const [lng, lat] = unproject((minX + maxX) / 2, (minY + maxY) / 2);
+      location.assign(`${location.origin}/maps/@${lat.toFixed(7)},${lng.toFixed(7)},${zoom.toFixed(2)}z${location.search}`);
+      return true;
+    }
+
+    const onMessage = (msg: unknown, _sender: unknown, sendResponse: (r: TabResponse) => void) => {
+      const type = (msg as Partial<TabRequest> | null)?.type;
+      if (type === 'zoomToResults') {
+        sendResponse({ ok: zoomToResults() });
+        return;
+      }
+      if (type !== 'getView') return;
       syncFromUrl();
       // In Street View, query around what the mini-map shows. A tilted or
       // rotated main map has no north-up rectangle to query.
@@ -293,6 +347,7 @@ export default defineContentScript({
       resizeObserver.disconnect();
       miniObserver.disconnect();
       if (miniFrame) cancelAnimationFrame(miniFrame);
+      if (hoverFrame) cancelAnimationFrame(hoverFrame);
       overlay.host.remove();
       mini.host.remove();
       card.close();

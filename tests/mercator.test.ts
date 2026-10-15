@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { expandBounds, fromScreen, project, toScreen, unproject, viewBounds, type View } from '../lib/mercator.ts';
+import { boundsSizeKm, expandBounds, fromScreen, project, toScreen, unproject, viewBounds, type View } from '../lib/mercator.ts';
 
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
 
@@ -84,4 +84,12 @@ test('expandBounds keeps a box that crosses the antimeridian crossing it', () =>
   assert.ok(edge.west < 179.99 && edge.east < 0, JSON.stringify(edge));
   // A huge minimum covers the whole world.
   assert.deepEqual([expandBounds({ south: 0, west: 0, north: 1, east: 1 }, 1e6).west, expandBounds({ south: 0, west: 0, north: 1, east: 1 }, 1e6).east], [-180, 180]);
+});
+
+test('boundsSizeKm matches expandBounds, including across the antimeridian', () => {
+  for (const b of [{ south: 51.5, west: -0.13, north: 51.501, east: -0.129 }, { south: -17.01, west: 179.995, north: -17, east: -179.995 }]) {
+    const size = boundsSizeKm(expandBounds(b, 3));
+    close(size.width, 3, 1e-6);
+    close(size.height, 3, 1e-6);
+  }
 });

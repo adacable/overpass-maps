@@ -1,7 +1,8 @@
 import { browser, defineBackground } from '#imports';
+import { inkOn } from '@/lib/color.ts';
 import { isHttpsUrl } from '@/lib/matches.ts';
 import { normaliseQuery, osmToGeoJSON, overpassErrorText, type OverpassResponse } from '@/lib/osm.ts';
-import { getSettings, resultsItem, statusItem } from '@/lib/storage.ts';
+import { getSettings, resultsItem, statusItem, watchSettings, type RunStatus } from '@/lib/storage.ts';
 
 /** Stay well inside Chrome's 10 MB storage.local quota (no unlimitedStorage). */
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
@@ -12,10 +13,34 @@ const MAX_RESULT_BYTES = 8 * 1024 * 1024;
  */
 const KEEP_ALIVE_MS = 20_000;
 
+/** The server never gave a usable response (down, overloaded, rate limiting). */
+class UnreachableError extends Error {}
+
 const tooMuchData = (detail: string) => `Too much data (${detail}). Zoom in, lower the minimum query area, or narrow the query.`;
+
+// MV3 calls the toolbar button `action`, MV2 `browserAction`.
+const toolbar = browser.action ?? browser.browserAction;
+
+/** Toolbar badge: … while running, the feature count when done, ! on error. */
+async function showBadge() {
+  const [status, { color }] = await Promise.all([statusItem.getValue(), getSettings()]);
+  const text = { idle: '', running: '…', done: status.state === 'done' ? compactCount(status.count) : '', error: '!' }[status.state];
+  const background = status.state === 'error' ? '#b3261e' : status.state === 'running' ? '#5d6d71' : color;
+  await toolbar.setBadgeText({ text });
+  await toolbar.setBadgeBackgroundColor({ color: background });
+  await toolbar.setBadgeTextColor?.({ color: status.state === 'done' ? inkOn(color) : '#fff' });
+}
+
+function compactCount(n: number): string {
+  return n < 1000 ? String(n) : n < 100_000 ? `${Math.floor(n / 1000)}k` : '99k+';
+}
 
 export default defineBackground(() => {
   let current: AbortController | null = null;
+
+  void showBadge();
+  statusItem.watch(() => void showBadge());
+  watchSettings(() => void showBadge());
 
   // A status still "running" at startup belongs to a query that died with the
   // previous background instance (e.g. the browser was closed mid-query).
@@ -31,9 +56,9 @@ export default defineBackground(() => {
     // Cancel / Clear / a newer query may arrive during any await below.
     const superseded = () => current !== controller;
     const keepAlive = setInterval(() => void browser.runtime.getPlatformInfo(), KEEP_ALIVE_MS);
-    await statusItem.setValue({ state: 'running', startedAt: Date.now() });
+    const { endpoint } = await getSettings();
+    await statusItem.setValue({ state: 'running', startedAt: Date.now(), endpoint });
     try {
-      const { endpoint } = await getSettings();
       if (!isHttpsUrl(endpoint)) throw new Error('The Overpass endpoint must be an https:// URL.');
       const res = await fetch(endpoint, {
         credentials: 'omit',
@@ -44,9 +69,13 @@ export default defineBackground(() => {
       }).catch(() => {
         // Without host permissions, responses lacking CORS headers (gateway
         // errors, rate limiting) surface only as an opaque network error.
-        throw new Error("Couldn't reach the Overpass server. It may be busy or down: try again shortly, or pick another endpoint in Settings.");
+        throw new UnreachableError("Couldn't reach the Overpass server. It may be busy or down.");
       });
-      if (!res.ok) throw new Error(`Overpass returned ${res.status}: ${overpassErrorText(await res.text())}`);
+      if (!res.ok) {
+        const message = `Overpass returned ${res.status}: ${overpassErrorText(await res.text())}`;
+        // Busy or failing servers; a 400 is a problem with the query itself.
+        throw res.status === 429 || res.status >= 500 ? new UnreachableError(message) : new Error(message);
+      }
       const data = (await res.json()) as OverpassResponse;
       // Overpass reports timeouts and memory limits as a remark on a 200 response.
       if (data.remark && /error/i.test(data.remark)) throw new Error(data.remark.trim());
@@ -62,7 +91,7 @@ export default defineBackground(() => {
     } catch (err) {
       if (superseded()) return;
       const message = err instanceof Error ? err.message : String(err);
-      await statusItem.setValue({ state: 'error', message, finishedAt: Date.now() });
+      await statusItem.setValue({ state: 'error', message, finishedAt: Date.now(), unreachable: err instanceof UnreachableError });
     } finally {
       clearInterval(keepAlive);
       if (current === controller) current = null;

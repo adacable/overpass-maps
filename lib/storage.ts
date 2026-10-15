@@ -12,11 +12,12 @@ export interface Settings {
 
 export type RunStatus =
   | { state: 'idle' }
-  | { state: 'running'; startedAt: number }
+  | { state: 'running'; startedAt: number; endpoint: string }
   | { state: 'done'; count: number; finishedAt: number }
-  | { state: 'error'; message: string; finishedAt: number };
+  /** `unreachable`: no usable response from the server, so another server may do better. */
+  | { state: 'error'; message: string; finishedAt: number; unreachable?: boolean };
 
-const DEFAULT_QUERY = `// {{bbox}} is the visible map area, grown to the minimum size set below.
+const DEFAULT_QUERY = `// Cafés around the map view.
 nwr["amenity"="cafe"]({{bbox}});
 out geom;`;
 

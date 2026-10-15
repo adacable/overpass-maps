@@ -4,39 +4,40 @@ import type { Prepared } from './render.ts';
 // A small card showing a feature's OSM tags, shown where the user clicked.
 // Tag values come from OSM and are untrusted: only ever inserted as text, never as HTML.
 
+// Same map-paper palette as the popup; the accent is the overlay colour.
 const STYLE = `
   :host { all: initial; }
   .card {
+    --paper: #f6f8f5; --ink: #1a292e; --muted: #5d6d71; --rule: #d9e0dc; --water: #2d6a88; --hover: #e6ece8;
     position: fixed; z-index: 2147483647; width: 300px; max-height: 380px;
     display: flex; flex-direction: column; overflow: hidden;
-    background: #fff; color: #1f1f1f; border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0,0,0,.25);
-    font: 13px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    background: var(--paper); color: var(--ink); border-radius: 10px;
+    box-shadow: 0 0 0 1px rgb(26 41 46 / .08), 0 6px 20px rgb(26 41 46 / .22);
+    font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   }
-  header { display: flex; align-items: flex-start; gap: 8px; padding: 12px 12px 8px 14px; border-top: 4px solid var(--accent); }
+  header { display: flex; align-items: flex-start; gap: 10px; padding: 12px 10px 10px 14px; }
+  .key { flex: none; width: 14px; height: 14px; margin-top: 3px; border-radius: 4px; background: color-mix(in srgb, var(--accent) 25%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
   .titles { flex: 1; min-width: 0; }
-  h1 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
-  .sub { color: #5f6368; font-size: 12px; overflow-wrap: anywhere; }
-  button { all: unset; cursor: pointer; border-radius: 50%; width: 24px; height: 24px; display: grid; place-items: center; color: #5f6368; font-size: 16px; }
-  button:hover { background: #f1f3f4; }
-  button:focus-visible { outline: 2px solid var(--accent); }
+  h1 { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+  .sub { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+  button { all: unset; cursor: pointer; border-radius: 6px; width: 24px; height: 24px; display: grid; place-items: center; color: var(--muted); font-size: 15px; }
+  button:hover { background: var(--hover); color: var(--ink); }
+  button:focus-visible { outline: 2px solid var(--water); outline-offset: 1px; }
   button:disabled { opacity: .35; cursor: default; background: none; }
-  .tags { overflow: auto; padding: 0 14px 4px; }
+  .tags { overflow: auto; padding: 0 14px 6px; }
   table { border-collapse: collapse; width: 100%; }
-  td { padding: 3px 0; vertical-align: top; border-top: 1px solid #eee; overflow-wrap: anywhere; }
-  td.k { color: #5f6368; padding-right: 10px; width: 40%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .empty { color: #5f6368; padding: 4px 0 8px; }
-  footer { display: flex; align-items: center; gap: 6px; padding: 8px 10px 10px 14px; border-top: 1px solid #eee; }
-  footer a { color: #1a73e8; text-decoration: none; flex: 1; }
-  footer a:hover { text-decoration: underline; }
-  .pager { color: #5f6368; font-size: 12px; }
-  a { color: #1a73e8; }
+  td { padding: 4px 0; vertical-align: top; border-top: 1px solid var(--rule); overflow-wrap: anywhere; }
+  td.k { color: var(--muted); padding-right: 12px; width: 40%; font: 12px/1.45 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+  .empty { color: var(--muted); padding: 4px 0 8px; }
+  footer { display: flex; align-items: center; gap: 4px; padding: 8px 10px 10px 14px; border-top: 1px solid var(--rule); }
+  footer a { flex: 1; }
+  a { color: var(--water); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  a:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; border-radius: 2px; }
+  .pager { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   @media (prefers-color-scheme: dark) {
-    .card { background: #202124; color: #e8eaed; }
-    .sub, td.k, .pager, .empty, button { color: #9aa0a6; }
-    button:hover { background: #3c4043; }
-    td, footer { border-color: #3c4043; }
-    footer a, a { color: #8ab4f8; }
+    .card { --paper: #132024; --ink: #e2ece9; --muted: #93a5a8; --rule: #2a3a3e; --water: #7fb6d2; --hover: #1f3035;
+      box-shadow: 0 0 0 1px rgb(255 255 255 / .06), 0 6px 20px rgb(0 0 0 / .5); }
   }
 `;
 
@@ -73,7 +74,8 @@ export class FeatureCard {
   private features: Prepared[] = [];
   private index = 0;
 
-  constructor() {
+  /** `onChange` runs whenever the feature shown changes, or the card closes. */
+  constructor(private onChange: () => void = () => {}) {
     const { host, root } = shadowHost('overpass-card');
     this.host = host;
     this.card.setAttribute('role', 'dialog');
@@ -86,6 +88,11 @@ export class FeatureCard {
 
   get isOpen(): boolean {
     return this.host.isConnected;
+  }
+
+  /** The feature on show, if the card is open. */
+  get selected(): Prepared | null {
+    return this.isOpen ? this.features[this.index] : null;
   }
 
   /** Whether an event happened inside the card. */
@@ -110,7 +117,9 @@ export class FeatureCard {
   }
 
   close(): void {
+    if (!this.isOpen) return;
     this.host.remove();
+    this.onChange();
   }
 
   private render(): void {
@@ -133,10 +142,11 @@ export class FeatureCard {
     }
 
     this.card.replaceChildren(
-      el('header', {}, el('div', { className: 'titles' }, el('h1', { textContent: title(f) }), el('div', { className: 'sub', textContent: subtitle(f) })), button('✕', 'Close', () => this.close())),
+      el('header', {}, el('span', { className: 'key' }), el('div', { className: 'titles' }, el('h1', { textContent: title(f) }), el('div', { className: 'sub', textContent: subtitle(f) })), button('✕', 'Close', () => this.close())),
       tags,
       footer,
     );
+    this.onChange();
   }
 
   private step(d: number): void {

@@ -108,3 +108,13 @@ export function expandBounds(b: Bounds, minKm: number): Bounds {
 export function metersPerPixel(lat: number, zoom: number): number {
   return (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
 }
+
+/** Approximate width and height of `b` in kilometres, measured through its middle. */
+export function boundsSizeKm(b: Bounds): { width: number; height: number } {
+  const lngSpan = b.west > b.east ? b.east + 360 - b.west : b.east - b.west;
+  const midLat = (b.south + b.north) / 2;
+  return {
+    width: lngSpan * KM_PER_DEG_LNG_EQUATOR * Math.cos((midLat * Math.PI) / 180),
+    height: (b.north - b.south) * KM_PER_DEG_LAT,
+  };
+}
