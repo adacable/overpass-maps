@@ -1,7 +1,8 @@
 import { browser, defineBackground } from '#imports';
+import { isHttpsUrl } from '@/lib/matches.ts';
 import type { BackgroundRequest } from '@/lib/messages.ts';
 import { normaliseQuery, osmToGeoJSON, type OverpassResponse } from '@/lib/osm.ts';
-import { resultsItem, settingsItem, statusItem } from '@/lib/storage.ts';
+import { getSettings, resultsItem, statusItem } from '@/lib/storage.ts';
 
 /** Stay well inside Chrome's 10 MB storage.local quota (no unlimitedStorage). */
 const MAX_RESULT_BYTES = 8 * 1024 * 1024;
@@ -14,14 +15,18 @@ export default defineBackground(() => {
     const controller = (current = new AbortController());
     await statusItem.setValue({ state: 'running', startedAt: Date.now() });
     try {
-      const settings = { ...settingsItem.fallback, ...(await settingsItem.getValue()) };
-      if (new URL(settings.endpoint).protocol !== 'https:') throw new Error('The Overpass endpoint must use https://.');
-      const res = await fetch(settings.endpoint, {
+      const { endpoint } = await getSettings();
+      if (!isHttpsUrl(endpoint)) throw new Error('The Overpass endpoint must be an https:// URL.');
+      const res = await fetch(endpoint, {
         credentials: 'omit',
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({ data: normaliseQuery(query) }),
         signal: controller.signal,
+      }).catch(() => {
+        // Without host permissions, responses lacking CORS headers (gateway
+        // errors, rate limiting) surface only as an opaque network error.
+        throw new Error("Couldn't reach the Overpass server. It may be busy or down: try again shortly, or pick another endpoint in Settings.");
       });
       if (!res.ok) throw new Error(`Overpass returned ${res.status}: ${extractError(await res.text())}`);
       const data = (await res.json()) as OverpassResponse;
@@ -37,14 +42,7 @@ export default defineBackground(() => {
       await statusItem.setValue({ state: 'done', count: fc.features.length, finishedAt: Date.now() });
     } catch (err) {
       if (controller.signal.aborted) return;
-      // Without host permissions, responses lacking CORS headers (gateway
-      // errors, rate limiting) surface only as an opaque network error.
-      const message =
-        err instanceof TypeError
-          ? "Couldn't reach the Overpass server. It may be busy or down: try again shortly, or pick another endpoint in Settings."
-          : err instanceof Error
-            ? err.message
-            : String(err);
+      const message = err instanceof Error ? err.message : String(err);
       await statusItem.setValue({ state: 'error', message, finishedAt: Date.now() });
     } finally {
       if (current === controller) current = null;

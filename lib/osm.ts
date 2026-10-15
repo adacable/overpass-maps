@@ -1,3 +1,5 @@
+import type { Bounds } from './mercator.ts';
+
 // Convert Overpass JSON output to GeoJSON. Handles the common output modes:
 // `out geom` (inline geometry), `out body; >; out skel` (ids resolved against
 // returned nodes/ways) and `out center` (centre point only).
@@ -151,6 +153,10 @@ function buildMultipolygon(outers: Position[][], inners: Position[][]): Geometry
     : { type: 'MultiPolygon', coordinates: polygons };
 }
 
+function centerPoint(el: Element): Geometry | null {
+  return el.center ? { type: 'Point', coordinates: [el.center.lon, el.center.lat] } : null;
+}
+
 export function osmToGeoJSON(data: OverpassResponse): FeatureCollection {
   const elements = data.elements ?? [];
   const nodes = new Map<number, Position>();
@@ -187,7 +193,8 @@ export function osmToGeoJSON(data: OverpassResponse): FeatureCollection {
     } else if (el.type === 'way') {
       const coords = ways.get(el.id);
       if (!coords) {
-        if (el.center) push(el, { type: 'Point', coordinates: [el.center.lon, el.center.lat] });
+        const center = centerPoint(el);
+        if (center) push(el, center);
         continue;
       }
       if (!interesting(el.tags) && membersOfRelations.has(key)) continue;
@@ -199,17 +206,17 @@ export function osmToGeoJSON(data: OverpassResponse): FeatureCollection {
         .filter((m) => m.type === 'way')
         .map((m) => ({ role: m.role, coords: m.geometry ? toPositions(m.geometry) : ways.get(m.ref) ?? [] }))
         .filter((m) => m.coords.length >= 2);
-      const kind = el.tags?.type;
+      const isArea = el.tags?.type === 'multipolygon' || el.tags?.type === 'boundary';
       let geometry: Geometry | null = null;
-      if ((kind === 'multipolygon' || kind === 'boundary') && memberWays.length) {
-        geometry = buildMultipolygon(
-          memberWays.filter((m) => m.role !== 'inner').map((m) => m.coords),
-          memberWays.filter((m) => m.role === 'inner').map((m) => m.coords),
-        );
-      } else if (memberWays.length) {
-        geometry = { type: 'MultiLineString', coordinates: memberWays.map((m) => m.coords) };
+      if (memberWays.length) {
+        geometry = isArea
+          ? buildMultipolygon(
+              memberWays.filter((m) => m.role !== 'inner').map((m) => m.coords),
+              memberWays.filter((m) => m.role === 'inner').map((m) => m.coords),
+            )
+          : { type: 'MultiLineString', coordinates: memberWays.map((m) => m.coords) };
       }
-      if (!geometry && el.center) geometry = { type: 'Point', coordinates: [el.center.lon, el.center.lat] };
+      geometry ??= centerPoint(el);
       if (geometry) push(el, geometry);
     }
   }
@@ -229,11 +236,7 @@ export function normaliseQuery(query: string): string {
 }
 
 /** Fill in `{{bbox}}` and `{{center}}` placeholders, Overpass Turbo style. */
-export function fillPlaceholders(
-  query: string,
-  bbox: { south: number; west: number; north: number; east: number },
-  center: { lat: number; lng: number },
-): string {
+export function fillPlaceholders(query: string, bbox: Bounds, center: { lat: number; lng: number }): string {
   const f = (n: number) => n.toFixed(6);
   return query
     .replace(/\{\{\s*bbox\s*\}\}/g, `${f(bbox.south)},${f(bbox.west)},${f(bbox.north)},${f(bbox.east)}`)

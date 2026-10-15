@@ -18,7 +18,6 @@ export function installCameraHook(): void {
         const p = m.payload;
         const bytes = p instanceof Uint8Array ? p : p instanceof ArrayBuffer ? new Uint8Array(p) : null;
         const cam = bytes && decodeCamera(bytes);
-        // A string detail crosses into the content script's world in every browser.
         if (cam) document.dispatchEvent(new CustomEvent(CAMERA_EVENT, { detail: JSON.stringify(cam) }));
       }
     } catch {

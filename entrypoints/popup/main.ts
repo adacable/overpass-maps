@@ -1,9 +1,9 @@
 import { browser } from '#imports';
-import { OVERPASS_ENDPOINTS } from '@/lib/matches.ts';
+import { isHttpsUrl, OVERPASS_ENDPOINTS } from '@/lib/matches.ts';
 import { expandBounds } from '@/lib/mercator.ts';
 import type { GetViewResponse } from '@/lib/messages.ts';
 import { fillPlaceholders } from '@/lib/osm.ts';
-import { queryItem, resultsItem, settingsItem, statusItem, type RunStatus, type Settings } from '@/lib/storage.ts';
+import { getSettings, queryItem, resultsItem, settingsItem, statusItem, type RunStatus, type Settings } from '@/lib/storage.ts';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const queryEl = $<HTMLTextAreaElement>('query');
@@ -22,7 +22,7 @@ for (const url of OVERPASS_ENDPOINTS) {
   $('endpoints').append(opt);
 }
 
-let settings: Settings = { ...settingsItem.fallback, ...(await settingsItem.getValue()) };
+let settings = await getSettings();
 queryEl.value = await queryItem.getValue();
 minBboxEl.value = String(settings.minBboxKm);
 colorEl.value = settings.color;
@@ -40,10 +40,8 @@ minBboxEl.addEventListener('change', () => {
 });
 colorEl.addEventListener('input', () => void saveSettings({ color: colorEl.value }));
 visibleEl.addEventListener('change', () => void saveSettings({ visible: visibleEl.checked }));
-const isHttps = (v: string) => URL.canParse(v) && new URL(v).protocol === 'https:';
 endpointEl.addEventListener('change', () => {
-  // https only: queries reveal where you're looking on the map.
-  const ok = isHttps(endpointEl.value);
+  const ok = isHttpsUrl(endpointEl.value);
   endpointEl.setCustomValidity(ok ? '' : 'Use an https:// Overpass endpoint.');
   endpointEl.reportValidity();
   if (ok) void saveSettings({ endpoint: endpointEl.value });

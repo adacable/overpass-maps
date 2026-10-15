@@ -22,8 +22,10 @@ export interface Bounds {
   east: number;
 }
 
-export function worldSize(zoom: number): number {
-  return TILE_SIZE * 2 ** zoom;
+/** Screen position = world position * scale + offset, for `view`. */
+export function screenTransform(view: View): { scale: number; ox: number; oy: number } {
+  const scale = TILE_SIZE * 2 ** view.zoom;
+  return { scale, ox: view.width / 2 - view.cx * scale, oy: view.height / 2 - view.cy * scale };
 }
 
 export function project(lng: number, lat: number): [number, number] {
@@ -41,13 +43,13 @@ export function unproject(x: number, y: number): [number, number] {
 }
 
 export function toScreen(view: View, x: number, y: number): [number, number] {
-  const ws = worldSize(view.zoom);
-  return [(x - view.cx) * ws + view.width / 2, (y - view.cy) * ws + view.height / 2];
+  const { scale, ox, oy } = screenTransform(view);
+  return [x * scale + ox, y * scale + oy];
 }
 
 export function fromScreen(view: View, sx: number, sy: number): [number, number] {
-  const ws = worldSize(view.zoom);
-  return [view.cx + (sx - view.width / 2) / ws, view.cy + (sy - view.height / 2) / ws];
+  const { scale, ox, oy } = screenTransform(view);
+  return [(sx - ox) / scale, (sy - oy) / scale];
 }
 
 export function viewBounds(view: View): Bounds {

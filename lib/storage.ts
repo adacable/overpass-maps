@@ -24,6 +24,13 @@ export const settingsItem = storage.defineItem<Settings>('local:settings', {
   fallback: { minBboxKm: 2, color: '#e8175d', endpoint: OVERPASS_ENDPOINTS[0], visible: true },
 });
 
+/** Stored settings over the defaults, so settings saved by an older version get any new keys. */
+const withDefaults = (s: Partial<Settings> | null): Settings => ({ ...settingsItem.fallback, ...s });
+
+export const getSettings = async () => withDefaults(await settingsItem.getValue());
+
+export const watchSettings = (cb: (s: Settings) => void) => settingsItem.watch((s) => cb(withDefaults(s)));
+
 export const queryItem = storage.defineItem<string>('local:query', { fallback: DEFAULT_QUERY });
 
 export const resultsItem = storage.defineItem<FeatureCollection | null>('local:results', { fallback: null });

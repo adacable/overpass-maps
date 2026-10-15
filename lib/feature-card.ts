@@ -1,8 +1,8 @@
+import { shadowHost } from './dom.ts';
 import type { Prepared } from './render.ts';
 
 // A small card showing a feature's OSM tags, shown where the user clicked.
-// Lives in a shadow root so Google's styles can't touch it (and vice versa).
-// Tag values come from OSM and are untrusted: only ever set via textContent.
+// Tag values come from OSM and are untrusted: only ever inserted as text, never as HTML.
 
 const STYLE = `
   :host { all: initial; }
@@ -49,6 +49,14 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
   return e;
 }
 
+function link(href: string, text: string) {
+  return el('a', { href, target: '_blank', rel: 'noopener noreferrer', textContent: text });
+}
+
+function button(text: string, label: string, onclick: () => void, disabled = false) {
+  return el('button', { textContent: text, title: label, ariaLabel: label, onclick, disabled });
+}
+
 function title(f: Prepared): string {
   return f.tags.name ?? f.tags['name:en'] ?? f.tags.ref ?? f.id;
 }
@@ -60,15 +68,16 @@ function subtitle(f: Prepared): string {
 }
 
 export class FeatureCard {
-  private host = document.createElement('overpass-card'); // not a div: Google re-lays-out stray divs
-  private root = this.host.attachShadow({ mode: 'closed' });
+  private readonly host: HTMLElement;
   private card = el('div', { className: 'card' });
   private features: Prepared[] = [];
   private index = 0;
 
   constructor() {
+    const { host, root } = shadowHost('overpass-card');
+    this.host = host;
     this.card.setAttribute('role', 'dialog');
-    this.root.append(el('style', { textContent: STYLE }), this.card);
+    root.append(el('style', { textContent: STYLE }), this.card);
     // Keep interactions with the card from bubbling up to Google's handlers.
     for (const t of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'wheel', 'contextmenu']) {
       this.card.addEventListener(t, (e) => e.stopPropagation());
@@ -106,27 +115,25 @@ export class FeatureCard {
 
   private render(): void {
     const f = this.features[this.index];
-    const close = el('button', { title: 'Close', ariaLabel: 'Close', textContent: '✕' });
-    close.addEventListener('click', () => this.close());
-
     const rows = Object.entries(f.tags).map(([k, v]) => {
-      const value: Node = URL_KEYS.has(k) && /^https?:\/\//i.test(v) ? el('a', { href: v, target: '_blank', rel: 'noopener noreferrer', textContent: v }) : document.createTextNode(v);
+      const value = URL_KEYS.has(k) && /^https?:\/\//i.test(v) ? link(v, v) : v;
       return el('tr', {}, el('td', { className: 'k', textContent: k }), el('td', {}, value));
     });
     const tags = el('div', { className: 'tags' }, rows.length ? el('table', {}, ...rows) : el('div', { className: 'empty', textContent: 'No tags' }));
 
     const [type, id] = f.id.split('/');
-    const footer = el('footer', {}, el('a', { href: `https://www.openstreetmap.org/${type}/${id}`, target: '_blank', rel: 'noopener noreferrer', textContent: 'View on OpenStreetMap' }));
-    if (this.features.length > 1) {
-      const prev = el('button', { title: 'Previous', ariaLabel: 'Previous feature', textContent: '‹', disabled: this.index === 0 });
-      const next = el('button', { title: 'Next', ariaLabel: 'Next feature', textContent: '›', disabled: this.index === this.features.length - 1 });
-      prev.addEventListener('click', () => this.step(-1));
-      next.addEventListener('click', () => this.step(1));
-      footer.append(prev, el('span', { className: 'pager', textContent: `${this.index + 1} of ${this.features.length}` }), next);
+    const footer = el('footer', {}, link(`https://www.openstreetmap.org/${type}/${id}`, 'View on OpenStreetMap'));
+    const n = this.features.length;
+    if (n > 1) {
+      footer.append(
+        button('‹', 'Previous feature', () => this.step(-1), this.index === 0),
+        el('span', { className: 'pager', textContent: `${this.index + 1} of ${n}` }),
+        button('›', 'Next feature', () => this.step(1), this.index === n - 1),
+      );
     }
 
     this.card.replaceChildren(
-      el('header', {}, el('div', { className: 'titles' }, el('h1', { textContent: title(f) }), el('div', { className: 'sub', textContent: subtitle(f) })), close),
+      el('header', {}, el('div', { className: 'titles' }, el('h1', { textContent: title(f) }), el('div', { className: 'sub', textContent: subtitle(f) })), button('✕', 'Close', () => this.close())),
       tags,
       footer,
     );

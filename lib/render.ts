@@ -1,5 +1,5 @@
-import { project, worldSize, type View } from './mercator.ts';
-import type { FeatureCollection, Position } from './osm.ts';
+import { project, screenTransform, type View } from './mercator.ts';
+import type { FeatureCollection, Geometry, Position } from './osm.ts';
 
 // Features pre-projected into normalised world coordinates so each frame only
 // needs a scale + translate.
@@ -26,35 +26,26 @@ function flatten(coords: Position[]): Float64Array {
   return out;
 }
 
+const KINDS: Record<Geometry['type'], Prepared['kind']> = {
+  Point: 'point',
+  LineString: 'line',
+  MultiLineString: 'line',
+  Polygon: 'polygon',
+  MultiPolygon: 'polygon',
+};
+
 export function prepare(fc: FeatureCollection | null): Prepared[] {
   if (!fc) return [];
   const out: Prepared[] = [];
   for (const f of fc.features) {
     const g = f.geometry;
-    let kind: Prepared['kind'];
-    let parts: Float64Array[];
-    switch (g.type) {
-      case 'Point':
-        kind = 'point';
-        parts = [flatten([g.coordinates])];
-        break;
-      case 'LineString':
-        kind = 'line';
-        parts = [flatten(g.coordinates)];
-        break;
-      case 'MultiLineString':
-        kind = 'line';
-        parts = g.coordinates.map(flatten);
-        break;
-      case 'Polygon':
-        kind = 'polygon';
-        parts = g.coordinates.map(flatten);
-        break;
-      case 'MultiPolygon':
-        kind = 'polygon';
-        parts = g.coordinates.flat().map(flatten);
-        break;
-    }
+    const kind = KINDS[g.type];
+    const lines =
+      g.type === 'Point' ? [[g.coordinates]]
+      : g.type === 'LineString' ? [g.coordinates]
+      : g.type === 'MultiPolygon' ? g.coordinates.flat()
+      : g.coordinates;
+    const parts = lines.map(flatten);
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of parts) {
       for (let i = 0; i < p.length; i += 2) {
@@ -75,6 +66,13 @@ const POINT_RADIUS = 5;
 /** Areas/lines smaller than this on screen are drawn as a dot so they stay visible. */
 const MIN_SHAPE_PX = 4;
 
+/** Where `f` is drawn as a dot (points, and shapes too small to see), in world units; null if drawn as a shape. */
+function dotAt(f: Prepared, ws: number): [number, number] | null {
+  if (f.kind === 'point') return [f.parts[0][0], f.parts[0][1]];
+  if ((f.maxX - f.minX) * ws < MIN_SHAPE_PX && (f.maxY - f.minY) * ws < MIN_SHAPE_PX) return [(f.minX + f.maxX) / 2, (f.minY + f.maxY) / 2];
+  return null;
+}
+
 export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepared[], color: string): void {
   const dpr = ctx.canvas.width / Math.max(1, view.width);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -82,9 +80,7 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepar
   if (!features.length) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const ws = worldSize(view.zoom);
-  const ox = view.width / 2 - view.cx * ws;
-  const oy = view.height / 2 - view.cy * ws;
+  const { scale: ws, ox, oy } = screenTransform(view);
   const margin = POINT_RADIUS * 2;
   // Visible world rectangle, padded so strokes and point markers at the edges still draw.
   const vMinX = (-margin - ox) / ws;
@@ -98,12 +94,9 @@ export function draw(ctx: CanvasRenderingContext2D, view: View, features: Prepar
 
   for (const f of features) {
     if (f.maxX < vMinX || f.minX > vMaxX || f.maxY < vMinY || f.minY > vMaxY) continue;
-    if (f.kind !== 'point' && (f.maxX - f.minX) * ws < MIN_SHAPE_PX && (f.maxY - f.minY) * ws < MIN_SHAPE_PX) {
-      dots.push([((f.minX + f.maxX) / 2) * ws + ox, ((f.minY + f.maxY) / 2) * ws + oy]);
-      continue;
-    }
-    if (f.kind === 'point') {
-      dots.push([f.parts[0][0] * ws + ox, f.parts[0][1] * ws + oy]);
+    const dot = dotAt(f, ws);
+    if (dot) {
+      dots.push([dot[0] * ws + ox, dot[1] * ws + oy]);
       continue;
     }
     ctx.beginPath();
@@ -155,26 +148,20 @@ function segmentDistSq(px: number, py: number, ax: number, ay: number, bx: numbe
  * then areas from smallest to largest (so nested areas stay clickable).
  */
 export function hitTest(view: View, features: Prepared[], sx: number, sy: number): Prepared[] {
-  const ws = worldSize(view.zoom);
-  const ox = view.width / 2 - view.cx * ws;
-  const oy = view.height / 2 - view.cy * ws;
+  const { scale: ws, ox, oy } = screenTransform(view);
   // Work in world units: the click position and tolerances.
   const px = (sx - ox) / ws;
   const py = (sy - oy) / ws;
   const tol = HIT_TOLERANCE_PX / ws;
   const dotR = (POINT_RADIUS + 3) / ws;
+  const pad = Math.max(tol, dotR);
   const hits: { f: Prepared; rank: number; size: number }[] = [];
 
   for (const f of features) {
-    const pad = Math.max(tol, dotR);
     if (px < f.minX - pad || px > f.maxX + pad || py < f.minY - pad || py > f.maxY + pad) continue;
-    const w = f.maxX - f.minX;
-    const h = f.maxY - f.minY;
-    const drawnAsDot = f.kind === 'point' || (w * ws < MIN_SHAPE_PX && h * ws < MIN_SHAPE_PX);
-    if (drawnAsDot) {
-      const cx = f.kind === 'point' ? f.parts[0][0] : (f.minX + f.maxX) / 2;
-      const cy = f.kind === 'point' ? f.parts[0][1] : (f.minY + f.maxY) / 2;
-      if ((px - cx) ** 2 + (py - cy) ** 2 <= dotR * dotR) hits.push({ f, rank: 0, size: 0 });
+    const dot = dotAt(f, ws);
+    if (dot) {
+      if ((px - dot[0]) ** 2 + (py - dot[1]) ** 2 <= dotR * dotR) hits.push({ f, rank: 0, size: 0 });
       continue;
     }
     let nearEdge = false;
@@ -187,7 +174,7 @@ export function hitTest(view: View, features: Prepared[], sx: number, sy: number
       }
     }
     if (f.kind === 'line' && nearEdge) hits.push({ f, rank: 1, size: 0 });
-    else if (f.kind === 'polygon' && (inside || nearEdge)) hits.push({ f, rank: 2, size: w * h });
+    else if (f.kind === 'polygon' && (inside || nearEdge)) hits.push({ f, rank: 2, size: (f.maxX - f.minX) * (f.maxY - f.minY) });
   }
   return hits.sort((a, b) => a.rank - b.rank || a.size - b.size).map((h) => h.f);
 }

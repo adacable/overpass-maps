@@ -9,6 +9,9 @@ const GOOGLE_DOMAINS = [
 
 export const MAPS_MATCHES = GOOGLE_DOMAINS.map((d) => `https://www.${d}/maps*`);
 
+/** https only: queries reveal where you're looking on the map. */
+export const isHttpsUrl = (v: string) => URL.canParse(v) && new URL(v).protocol === 'https:';
+
 // Overpass servers send `Access-Control-Allow-Origin: *`, so the extension
 // needs no host permissions to query them.
 export const OVERPASS_ENDPOINTS = [

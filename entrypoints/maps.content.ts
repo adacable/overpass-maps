@@ -1,13 +1,15 @@
 import { browser, defineContentScript, injectScript } from '#imports';
-import { CAMERA_EVENT, type MapCamera } from '@/lib/camera-proto.ts';
+import { CAMERA_EVENT, parseCameraEvent, type MapCamera } from '@/lib/camera-proto.ts';
+import { largest } from '@/lib/dom.ts';
 import { FeatureCard } from '@/lib/feature-card.ts';
 import { parseCamera } from '@/lib/gmaps-url.ts';
 import { MAPS_MATCHES } from '@/lib/matches.ts';
 import { project, unproject, viewBounds, type View } from '@/lib/mercator.ts';
 import type { GetViewRequest, GetViewResponse } from '@/lib/messages.ts';
 import { findMinimapViewport, readMinimapView } from '@/lib/minimap.ts';
-import { draw, hitTest, prepare } from '@/lib/render.ts';
-import { resultsItem, settingsItem, type Settings } from '@/lib/storage.ts';
+import { Overlay } from '@/lib/overlay.ts';
+import { hitTest, prepare } from '@/lib/render.ts';
+import { getSettings, resultsItem, watchSettings } from '@/lib/storage.ts';
 
 const URL_POLL_MS = 100;
 const MINIMAP_POLL_MS = 250;
@@ -15,45 +17,12 @@ const MINIMAP_POLL_MS = 250;
 const CLICK_SLOP_PX = 5;
 const CLICK_MAX_MS = 600;
 
-/**
- * An overlay canvas inside a closed shadow root. It sits in Google's page, so
- * a plain canvas could be read back (getImageData) by the page's scripts,
- * revealing the query results; a closed shadow root keeps it out of reach.
- */
-function makeOverlay(): { host: HTMLElement; canvas: HTMLCanvasElement } {
-  // Not a <div>: Google's map container treats child divs as its own and
-  // spins re-laying them out, freezing the page. An unknown tag is ignored.
-  const host = document.createElement('overpass-layer');
-  host.setAttribute('aria-hidden', 'true');
-  Object.assign(host.style, { position: 'absolute', pointerEvents: 'none' });
-  const canvas = document.createElement('canvas');
-  Object.assign(canvas.style, { display: 'block', width: '100%', height: '100%' });
-  host.attachShadow({ mode: 'closed' }).append(canvas);
-  return { host, canvas };
-}
+/** How long after a feature click to withhold the mouseup / click / dblclick that follow. */
+const SWALLOW_MS = 400;
 
-/** Match an overlay's position, size and pixel density to `target`. */
-function fitTo(host: HTMLElement, canvas: HTMLCanvasElement, target: HTMLElement) {
-  const w = target.clientWidth;
-  const h = target.clientHeight;
-  Object.assign(host.style, { left: `${target.offsetLeft}px`, top: `${target.offsetTop}px`, width: `${w}px`, height: `${h}px` });
-  // Resizing a canvas clears it, so only do it when the size really changed.
-  const dpr = window.devicePixelRatio || 1;
-  const pw = Math.round(w * dpr);
-  const ph = Math.round(h * dpr);
-  if (canvas.width !== pw || canvas.height !== ph) {
-    canvas.width = pw;
-    canvas.height = ph;
-  }
-}
-
-function isValidCamera(c: unknown): c is MapCamera {
-  const cam = c as MapCamera | null;
-  const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
-  return (
-    !!cam && finite(cam.lat) && finite(cam.lng) && finite(cam.zoom) && typeof cam.rotated === 'boolean' &&
-    Math.abs(cam.lat) <= 90 && Math.abs(cam.lng) <= 360 && cam.zoom >= 0 && cam.zoom <= 30
-  );
+function swallow(e: Event) {
+  e.stopImmediatePropagation();
+  e.preventDefault();
 }
 
 export default defineContentScript({
@@ -61,27 +30,26 @@ export default defineContentScript({
   runAt: 'document_idle',
 
   async main(ctx) {
-    let settings: Settings = { ...settingsItem.fallback, ...(await settingsItem.getValue()) };
+    let settings = await getSettings();
     let features = prepare(await resultsItem.getValue());
     const card = new FeatureCard();
+    const haveSomethingToShow = () => settings.visible && features.length > 0;
 
     // ===== Main map =========================================================
 
-    const { host: overlay, canvas: overlayCanvas } = makeOverlay();
-    const g2d = overlayCanvas.getContext('2d')!;
+    const overlay = new Overlay();
     let scene: HTMLCanvasElement | null = null;
 
     // Where the map is looking. Google's per-frame camera messages (see
     // camera-hook.ts) are exact, including during animations; the URL is the
     // fallback until the first message arrives, or if the hook stops matching
     // Google's code.
-    let camera: { lat: number; lng: number; zoom: number } | null = null;
+    let camera: MapCamera | null = null;
     let haveLiveCamera = false;
-    let cameraRotated = false;
     let urlRotated = false;
     let view: View | null = null;
 
-    const mainVisible = () => !!view && !cameraRotated && !urlRotated && settings.visible && features.length > 0;
+    const mainVisible = () => !!view && !camera?.rotated && !urlRotated && haveSomethingToShow();
 
     function updateView() {
       const width = scene?.clientWidth ?? 0;
@@ -94,37 +62,14 @@ export default defineContentScript({
       view = { cx, cy, zoom: camera.zoom, width, height };
     }
 
-    let frame = 0;
-    function render() {
-      if (frame) cancelAnimationFrame(frame);
-      frame = 0;
-      const show = mainVisible();
-      overlay.style.display = show ? '' : 'none';
-      if (show) draw(g2d, view!, features, settings.color);
-    }
-    const redraw = () => {
-      if (!frame) frame = requestAnimationFrame(render);
-    };
-
-    function findSceneCanvas(): HTMLCanvasElement | null {
-      // Google's class names are obfuscated and change, so go by size: the map
-      // is the largest canvas, covering most of the window.
-      let best: HTMLCanvasElement | null = null;
-      let bestArea = window.innerWidth * window.innerHeight * 0.5;
-      for (const c of document.querySelectorAll('canvas')) {
-        const r = c.getBoundingClientRect();
-        if (r.width * r.height > bestArea) {
-          best = c;
-          bestArea = r.width * r.height;
-        }
-      }
-      return best;
-    }
+    const render = () => overlay.paint(mainVisible() ? view : null, features, settings.color);
 
     const resizeObserver = new ResizeObserver(() => layout());
 
     function attach() {
-      const found = findSceneCanvas();
+      // Google's class names are obfuscated and change, so go by size: the map
+      // is the largest canvas, covering most of the window.
+      const found = largest(document.querySelectorAll('canvas'), window.innerWidth * window.innerHeight * 0.5);
       if (found !== scene) {
         if (scene) resizeObserver.unobserve(scene);
         scene = found;
@@ -135,17 +80,16 @@ export default defineContentScript({
       // last of them so we're over the map but under Google's panels and controls.
       const canvases = scene.parentElement!.querySelectorAll(':scope > canvas');
       const anchor = canvases[canvases.length - 1] ?? scene;
-      if (overlay.previousElementSibling !== anchor) {
-        anchor.insertAdjacentElement('afterend', overlay);
+      if (overlay.host.previousElementSibling !== anchor) {
+        anchor.after(overlay.host);
         layout();
       }
     }
 
     function layout() {
       if (!scene) return;
-      fitTo(overlay, overlayCanvas, scene);
+      overlay.fitTo(scene);
       syncFromUrl();
-      updateView();
       render();
     }
 
@@ -158,15 +102,15 @@ export default defineContentScript({
       // even when camera messages are flowing.
       urlRotated = !!cam?.rotated;
       if (!haveLiveCamera && cam && cam.zoom !== null) {
-        camera = { lat: cam.lat, lng: cam.lng, zoom: cam.zoom };
+        camera = { lat: cam.lat, lng: cam.lng, zoom: cam.zoom, rotated: cam.rotated };
       }
+      updateView();
     }
 
     ctx.setInterval(() => {
       if (location.href === lastHref) return;
       syncFromUrl();
-      updateView();
-      redraw();
+      render();
     }, URL_POLL_MS);
     // Google re-renders parts of the page; re-attach if our canvas gets dropped
     // or another canvas gets stacked above it.
@@ -174,19 +118,10 @@ export default defineContentScript({
     ctx.addEventListener(window, 'resize', () => layout());
 
     const onCamera = (e: Event) => {
-      const detail = (e as CustomEvent<unknown>).detail;
-      if (typeof detail !== 'string') return;
-      // Any script on the page can send this event: accept only a sane camera.
-      let cam: MapCamera;
-      try {
-        cam = JSON.parse(detail);
-      } catch {
-        return;
-      }
-      if (!isValidCamera(cam)) return;
+      const cam = parseCameraEvent((e as CustomEvent<unknown>).detail);
+      if (!cam) return;
       haveLiveCamera = true;
       camera = cam;
-      cameraRotated = cam.rotated;
       updateView();
       // Draw immediately rather than on the next animation frame: the message
       // is sent from Google's own frame callback, so this keeps us in step.
@@ -200,45 +135,39 @@ export default defineContentScript({
     // A separate, tile-based map; we read its position from the tiles every
     // frame while it's on screen (see lib/minimap.ts).
 
-    const { host: mini, canvas: miniCanvas } = makeOverlay();
-    const mini2d = miniCanvas.getContext('2d')!;
+    const mini = new Overlay();
     let miniViewport: HTMLElement | null = null;
     let miniView: View | null = null;
-    let miniKey = '';
     let miniFrame = 0;
 
-    const miniVisible = () => !!miniViewport && !!miniView && settings.visible && features.length > 0;
+    const miniVisible = () => !!miniViewport && !!miniView && haveSomethingToShow();
 
     function miniTick() {
       miniFrame = 0;
       if (!miniViewport?.isConnected) return watchMinimap();
-      if (mini.nextElementSibling !== miniViewport) placeMini(miniViewport);
-      fitTo(mini, miniCanvas, miniViewport);
+      if (mini.host.nextElementSibling !== miniViewport) placeMini(miniViewport);
+      mini.fitTo(miniViewport);
       // Tiles can be briefly unreadable while Google swaps them; keep the last
       // view rather than blinking out.
       miniView = readMinimapView(miniViewport) ?? miniView;
-      const show = miniVisible();
-      mini.style.display = show ? '' : 'none';
-      // Only redraw when something moved; reading the tiles is cheap, drawing less so.
-      const key = show ? `${miniView!.cx},${miniView!.cy},${miniView!.zoom},${miniCanvas.width},${miniCanvas.height},${settings.color}` : '';
-      if (show && key !== miniKey) draw(mini2d, miniView!, features, settings.color);
-      miniKey = key;
+      // Reading the tiles every frame is cheap; paint only redraws when something moved.
+      mini.paint(miniVisible() ? miniView : null, features, settings.color);
       miniFrame = requestAnimationFrame(miniTick);
     }
 
     function placeMini(vp: HTMLElement) {
       // Just under the mini-map's input layer: sharing its z-index but earlier in
       // the DOM puts us above the tiles and below pegman and the controls.
-      vp.insertAdjacentElement('beforebegin', mini);
-      mini.style.zIndex = getComputedStyle(vp).zIndex;
-      miniKey = ''; // force a redraw
+      vp.before(mini.host);
+      mini.host.style.zIndex = getComputedStyle(vp).zIndex;
+      mini.invalidate();
     }
 
     // Google re-renders the mini-map's DOM while it moves (pan, zoom, rotating
     // Street View), dropping our canvas each time. Put it back as soon as that
     // happens: observer callbacks run before the next paint, so it never blinks.
     const miniObserver = new MutationObserver(() => {
-      if (miniViewport?.isConnected && mini.nextElementSibling !== miniViewport) placeMini(miniViewport);
+      if (miniViewport?.isConnected && mini.host.nextElementSibling !== miniViewport) placeMini(miniViewport);
       else if (miniViewport && !miniViewport.isConnected) watchMinimap();
     });
 
@@ -252,7 +181,7 @@ export default defineContentScript({
       if (miniFrame) cancelAnimationFrame(miniFrame);
       miniFrame = 0;
       if (!vp) {
-        mini.remove();
+        mini.host.remove();
         miniView = null;
         return;
       }
@@ -270,14 +199,14 @@ export default defineContentScript({
 
     function featuresAt(target: EventTarget | null, x: number, y: number) {
       if (!(target instanceof Node)) return [];
-      const surfaces: [boolean, HTMLElement | null | undefined, HTMLElement, View | null][] = [
-        [miniVisible(), miniViewport, mini, miniView],
-        [mainVisible(), scene?.parentElement, overlay, view],
-      ];
-      for (const [visible, container, host, v] of surfaces) {
+      const surfaces = [
+        [miniVisible() ? miniView : null, miniViewport, mini],
+        [mainVisible() ? view : null, scene?.parentElement, overlay],
+      ] as const;
+      for (const [v, container, o] of surfaces) {
         // Must be on the map itself, not one of Google's panels floating over it.
-        if (!visible || !v || !container?.contains(target)) continue;
-        const r = host.getBoundingClientRect();
+        if (!v || !container?.contains(target)) continue;
+        const r = o.host.getBoundingClientRect();
         if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
         return hitTest(v, features, x - r.left, y - r.top);
       }
@@ -304,19 +233,14 @@ export default defineContentScript({
       if (!isClick) return;
       const hits = featuresAt(e.target, e.clientX, e.clientY);
       if (!hits.length) return;
-      e.stopImmediatePropagation();
-      e.preventDefault();
-      // Also withhold the mouseup / click / dblclick that follow this release.
-      swallowUntil = e.timeStamp + 400;
+      swallow(e);
+      swallowUntil = e.timeStamp + SWALLOW_MS;
       card.show(hits, e.clientX, e.clientY, settings.color);
     }, capture);
 
     for (const type of ['mouseup', 'click', 'dblclick']) {
       ctx.addEventListener(window, type, (e: Event) => {
-        if (e.timeStamp < swallowUntil && !card.contains(e)) {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-        }
+        if (e.timeStamp < swallowUntil && !card.contains(e)) swallow(e);
       }, capture);
     }
 
@@ -326,27 +250,23 @@ export default defineContentScript({
 
     // ===== Data & messages ==================================================
 
-    const refreshAll = () => {
-      miniKey = '';
-      redraw();
-    };
+    // The mini-map repaints itself every frame; only the main map needs a nudge.
     const unwatchResults = resultsItem.watch((fc) => {
       features = prepare(fc);
       card.close();
-      refreshAll();
+      render();
     });
-    const unwatchSettings = settingsItem.watch((s) => {
-      settings = { ...settingsItem.fallback, ...s };
-      refreshAll();
+    const unwatchSettings = watchSettings((s) => {
+      settings = s;
+      render();
     });
 
     const onMessage = (msg: GetViewRequest, _sender: unknown, sendResponse: (r: GetViewResponse) => void) => {
       if (msg?.type !== 'getView') return;
       syncFromUrl();
-      updateView();
       // In Street View, query around what the mini-map shows.
-      const v = urlRotated && miniView ? miniView : view;
-      if (!v || (v === view && (!camera || urlRotated))) {
+      const v = urlRotated ? miniView : view;
+      if (!v) {
         sendResponse({ ok: false, error: "Couldn't read the map position. Switch out of 3D and try again." });
         return;
       }
@@ -363,8 +283,8 @@ export default defineContentScript({
       resizeObserver.disconnect();
       miniObserver.disconnect();
       if (miniFrame) cancelAnimationFrame(miniFrame);
-      overlay.remove();
-      mini.remove();
+      overlay.host.remove();
+      mini.host.remove();
       card.close();
     });
 

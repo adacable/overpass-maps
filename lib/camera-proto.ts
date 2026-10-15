@@ -75,13 +75,39 @@ function num(fields: Field[] | null, n: number): number | undefined {
 export function decodeCamera(payload: Uint8Array): MapCamera | null {
   const cam = sub(payload, sub(payload, readFields(payload, 0, payload.length), 8), 2);
   const latLng = sub(payload, sub(payload, cam, 1), 3);
-  const lat = num(latLng, 1);
-  const lng = num(latLng, 2);
-  const zoom = num(cam, 2);
-  if (lat === undefined || lng === undefined || zoom === undefined) return null;
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 360 || !(zoom >= 0 && zoom <= 30)) return null;
-  const rotated = (num(cam, 5) ?? 0) !== 0 || (num(cam, 6) ?? 0) !== 0;
-  return { lat, lng, zoom, rotated };
+  const camera = {
+    lat: num(latLng, 1),
+    lng: num(latLng, 2),
+    zoom: num(cam, 2),
+    rotated: (num(cam, 5) ?? 0) !== 0 || (num(cam, 6) ?? 0) !== 0,
+  };
+  return isValidCamera(camera) ? camera : null;
 }
 
+/** Whether `c` is a camera with a plausible position and zoom. */
+export function isValidCamera(c: unknown): c is MapCamera {
+  const cam = c as Partial<MapCamera> | null;
+  const finite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+  return (
+    !!cam && finite(cam.lat) && finite(cam.lng) && finite(cam.zoom) && typeof cam.rotated === 'boolean' &&
+    Math.abs(cam.lat) <= 90 && Math.abs(cam.lng) <= 360 && cam.zoom >= 0 && cam.zoom <= 30
+  );
+}
+
+/**
+ * The hook (camera-hook.ts) re-broadcasts each camera as a DOM event with a
+ * JSON string detail: a string crosses into the content script's world in
+ * every browser.
+ */
 export const CAMERA_EVENT = 'overpass-maps:camera';
+
+/** Read a CAMERA_EVENT's detail. Any script on the page can send one, so only a sane camera is accepted. */
+export function parseCameraEvent(detail: unknown): MapCamera | null {
+  if (typeof detail !== 'string') return null;
+  try {
+    const cam: unknown = JSON.parse(detail);
+    return isValidCamera(cam) ? cam : null;
+  } catch {
+    return null;
+  }
+}

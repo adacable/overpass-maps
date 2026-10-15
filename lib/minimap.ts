@@ -5,6 +5,7 @@
 // = zoom 15, x 32743, y 21794, 128px tiles. One tile's on-screen rectangle is
 // enough to place the whole map exactly.
 
+import { largest } from './dom.ts';
 import { TILE_SIZE, type View } from './mercator.ts';
 
 export interface Tile {
@@ -51,16 +52,7 @@ export function viewFromTile(tile: Tile, tileRect: Rect, viewport: Rect): View {
 export function findMinimapViewport(): HTMLElement | null {
   // Several elements carry minimap actions (e.g. a zero-size accessibility
   // button); the input layer is the visible one handling mouse presses.
-  let best: HTMLElement | null = null;
-  let bestArea = 0;
-  for (const el of document.querySelectorAll<HTMLElement>('[jsaction*="mousedown:minimap.main"]')) {
-    const r = el.getBoundingClientRect();
-    if (r.width * r.height > bestArea) {
-      best = el;
-      bestArea = r.width * r.height;
-    }
-  }
-  return best;
+  return largest(document.querySelectorAll<HTMLElement>('[jsaction*="mousedown:minimap.main"]'));
 }
 
 /** Read the mini-map's current view from any visible tile near the viewport. */

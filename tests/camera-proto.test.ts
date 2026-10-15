@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeCamera } from '../lib/camera-proto.ts';
+import { decodeCamera, parseCameraEvent } from '../lib/camera-proto.ts';
 
 // Minimal protobuf encoder to build payloads shaped like Google's.
 const varint = (n: number) => { const o: number[] = []; while (n > 127) { o.push((n & 127) | 128); n = Math.floor(n / 128); } o.push(n); return o; };
@@ -33,4 +33,15 @@ test('rejects other shapes and garbage', () => {
   assert.equal(decodeCamera(new Uint8Array(msg(8, msg(2, dbl(2, 16))))), null);
   assert.equal(decodeCamera(new Uint8Array([0xff, 0xff, 0xff])), null);
   assert.equal(decodeCamera(new Uint8Array()), null);
+});
+
+test('camera events accept only a sane camera', () => {
+  const cam = { lat: 51.5, lng: -0.1, zoom: 15, rotated: false };
+  assert.deepEqual(parseCameraEvent(JSON.stringify(cam)), cam);
+  assert.equal(parseCameraEvent(cam), null);
+  assert.equal(parseCameraEvent('{not json'), null);
+  assert.equal(parseCameraEvent(JSON.stringify({ ...cam, lat: 200 })), null);
+  assert.equal(parseCameraEvent(JSON.stringify({ ...cam, zoom: 'x' })), null);
+  assert.equal(parseCameraEvent(JSON.stringify({ ...cam, rotated: undefined })), null);
+  assert.equal(parseCameraEvent('null'), null);
 });
