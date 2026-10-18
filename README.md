@@ -1,9 +1,12 @@
 # Overpass Maps
 
-Browser extension (Chrome + Firefox) that draws the results of an
-[Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) query on top
-of Google Maps. The map keeps working as normal: only clicks on a drawn
-feature are taken over, to show its details.
+[Overpass turbo](https://overpass-turbo.eu/) is very useful for geolocation work, but cross referencing it with satilite or street view imagery- this extension loads overpass queries over google maps, which streamlines things significantly. 
+
+Has reasonable backoffs from overpass servers, but please be careful.
+
+Please file bugs- I've only tested this on chrome and firefox on one machine. 
+
+Below is (accurate and checked) LLM generated documentation. 
 
 ## Use
 
