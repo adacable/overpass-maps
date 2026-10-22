@@ -1,5 +1,7 @@
 # Overpass Maps
 
+Install: [Chrome Web Store](https://chromewebstore.google.com/detail/overpass-maps/fmhcaakelfeghadjaenedajnjblpnjko) · [Firefox Add-ons](https://addons.mozilla.org/en-GB/firefox/addon/overpass-maps/)
+
 [Overpass turbo](https://overpass-turbo.eu/) is very useful for geolocation work, but cross referencing it with satilite or street view imagery- this extension loads overpass queries over google maps, which streamlines things significantly. 
 
 Has reasonable backoffs from overpass servers, but please be careful.
